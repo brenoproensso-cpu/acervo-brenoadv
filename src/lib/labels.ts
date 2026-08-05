@@ -38,7 +38,18 @@ export const RESULTADO: Record<string, string> = {
   nao_conhecido: "Não conhecido",
 };
 
-export const CONCLUSAO: Record<string, string> = {
+/** Valores do enum conclusao_pericial no banco. */
+export type ConclusaoPericial =
+  | "incapacidade_total_permanente"
+  | "incapacidade_total_temporaria"
+  | "incapacidade_parcial_permanente"
+  | "incapacidade_parcial_temporaria"
+  | "impedimento_longo_prazo"
+  | "sem_impedimento"
+  | "sem_incapacidade"
+  | "inconclusivo";
+
+export const CONCLUSAO: Record<ConclusaoPericial, string> = {
   incapacidade_total_permanente: "Incapacidade total e permanente",
   incapacidade_total_temporaria: "Incapacidade total e temporária",
   incapacidade_parcial_permanente: "Incapacidade parcial e permanente",

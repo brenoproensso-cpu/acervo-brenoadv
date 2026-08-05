@@ -38,6 +38,25 @@ export default async function Painel() {
         descricao="Visão geral do acervo e dos padrões observados nos casos já julgados."
       />
 
+      {/* Laudo extraído por máquina fica fora das contas até ser conferido.
+          Se a fila crescer sem ninguém olhar, o painel passa a mostrar uma
+          amostra menor do que o acervo real — daí o aviso ficar no topo. */}
+      {num(r?.laudos_pendentes) > 0 && (
+        <Link
+          href="/revisao"
+          className="cartao mb-5 flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+          style={{ background: "var(--papel-2)" }}
+        >
+          <span className="text-sm">
+            <strong>{num(r?.laudos_pendentes)}</strong> laudo
+            {num(r?.laudos_pendentes) === 1 ? "" : "s"} importado
+            {num(r?.laudos_pendentes) === 1 ? "" : "s"} aguardando conferência —
+            ainda fora das estatísticas abaixo.
+          </span>
+          <span className="botao botao-secundario">Conferir agora →</span>
+        </Link>
+      )}
+
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Indicador
           rotulo="Casos julgados"

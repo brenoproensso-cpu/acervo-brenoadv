@@ -45,6 +45,11 @@ export type Resumo = {
   casos_julgados: string;
   casos_favoraveis: string;
   taxa_exito_geral: string | null;
+  laudos_pendentes: string;
+  publicacoes_nao_lidas: string;
+  prazos_proximos: string;
+  documentos_importados: string;
+  decisoes_pendentes: string;
 };
 
 export const resumo = () => consultarUm<Resumo>("select * from vw_acervo_resumo");

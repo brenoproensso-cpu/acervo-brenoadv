@@ -109,6 +109,88 @@ demais para orientar decisão.
 
 ---
 
+## Entrada de dados: DJEN, DataJud e PDPJ
+
+As três fontes entregam coisas diferentes, e essa diferença define o desenho
+da ingestão.
+
+| Fonte | Entrega | Não entrega |
+|---|---|---|
+| **DJEN** | Teor das intimações e comunicações publicadas. Consulta por OAB. | Inteiro teor de sentença, petições, laudo. |
+| **DataJud** (API Pública CNJ) | Metadados do processo e movimentos codificados pela TPU, de 91 tribunais com uma chave só. | Texto de documento — nenhum. |
+| **PDPJ** (DataLake) | O texto dos documentos: inicial, contestação, sentença, acórdão e **laudo pericial**. | — |
+
+A consequência prática: **só o PDPJ alimenta a análise de padrões**. Perito e
+conclusão pericial não são campo estruturado em lugar nenhum — saem do texto do
+laudo. DJEN e DataJud mantêm o acervo vivo (publicações, prazos, andamentos),
+mas não geram um único ponto no cruzamento "conclusão × desfecho".
+
+### Como rodar
+
+```bash
+# Publicações dos últimos 7 dias
+npm run ingerir -- djen --oab 123456 --uf SP --dias 7
+
+# Processos e movimentos de um tribunal
+npm run ingerir -- datajud --tribunal trf3 --desde 2026-01-01
+
+# Documentos de processo (arquivo JSON coletado por qualquer meio)
+npm run ingerir -- pdpj --arquivo documentos.json
+```
+
+**Use `--dry-run` na primeira execução de cada fonte.** Ele mostra como os
+campos foram interpretados sem gravar nada:
+
+```bash
+npm run ingerir -- djen --oab 123456 --uf SP --dry-run
+```
+
+A aplicação precisa estar no ar. Para sincronizar por cron, chame direto o
+endpoint `POST /api/ingerir` (proteja com `INGESTAO_TOKEN`).
+
+### Sobre os contratos das APIs
+
+Os adaptadores em `src/lib/integracoes/` foram escritos contra a documentação
+das APIs, mas **não foram exercitados contra os endpoints em produção** — o
+ambiente onde este código nasceu não tem saída de rede. É provável que algum
+nome de campo divirja na primeira execução real.
+
+O desenho absorve isso:
+
+1. **O payload cru é gravado inteiro** em `payload_bruto`, antes de qualquer
+   normalização. Nada se perde.
+2. **A leitura tolera variações** — `campo(item, "numeroProcesso",
+   "numero_processo", "numeroCnj")` tenta os nomes em ordem.
+3. **O conserto fica num lugar só**: a função `normalizar()` do adaptador da
+   fonte. Corrigido o mapeamento, reprocesse a partir do bruto.
+
+### A barreira de conferência
+
+Conclusão pericial e resultado de sentença são **inferidos de texto corrido**,
+muitas vezes vindo de OCR. Errar a classificação de um laudo não gera só uma
+linha errada: distorce a taxa de êxito do perito, que é exatamente o número
+usado para decidir se vale impugnar.
+
+Por isso tudo que a extração produz entra marcado como
+`extraido_automatico` e **fica fora das estatísticas** até ser confirmado na
+tela **Conferência** (`/revisao`). O painel avisa quando a fila cresce.
+
+A extração acompanha um conjunto de casos de teste, incluindo armadilhas
+(laudo cuja fundamentação cita incapacidade mas cuja conclusão nega):
+
+```bash
+npm run testar:extracao
+```
+
+Dois pontos que a máquina não resolve sozinha e a conferência pergunta:
+
+- **Se o laudo é ambíguo**, a confiança sai baixa e o item vai para o topo da
+  fila.
+- **Se a decisão é de recurso**, "nego provimento" pode ser favorável ou não,
+  conforme quem recorreu — a tela pergunta explicitamente.
+
+---
+
 ## Decisões de modelagem que valem explicar
 
 **`favoravel` é uma coluna, não um cálculo.** O desfecho "desprovido" é
@@ -153,6 +235,13 @@ src/
     db.ts             Pool de conexão e montagem de filtros
     queries.ts        Todas as consultas
     labels.ts         Tradução dos enums para a tela
+    integracoes/
+      tipos.ts        Contratos internos e leitura tolerante de campos
+      djen.ts         Cliente e normalizador do DJEN
+      datajud.ts      Cliente e normalizador do DataJud
+      pdpj.ts         Documentos do PDPJ e categorização
+      extracao.ts     Conclusão pericial e resultado, a partir do texto
+      gravar.ts       Persistência idempotente
 ```
 
 Migrations são **append-only**: para mudar o schema, crie um arquivo novo em
@@ -162,12 +251,15 @@ Migrations são **append-only**: para mudar o schema, crie um arquivo novo em
 
 ## Próximos passos sugeridos
 
-1. **Importação em massa** do acervo existente (PDF/DOCX com extração de texto).
-2. **Processos e andamentos**: movimentações, prazos e alertas de vencimento.
-3. **Anexos**: a tabela `arquivo` já existe, falta a tela de upload.
-4. **Autenticação**, antes de qualquer exposição fora da rede interna.
-5. **Integração** com os sistemas de tramitação e pesquisa jurisprudencial já
-   usados pelo escritório, para popular o acervo automaticamente.
+1. **Conferir os adaptadores** contra as APIs reais, com `--dry-run`, e ajustar
+   os mapeamentos que divergirem.
+2. **Autenticação**, antes de qualquer exposição fora da rede interna.
+3. **Sincronização periódica** por cron chamando `/api/ingerir`.
+4. **Prazos**: a estimativa a partir do tipo de comunicação é rudimentar;
+   contagem real depende de suspensão de expediente e feriado local.
+5. **Extração por LLM** como segunda opinião nos laudos de baixa confiança,
+   mantendo a conferência humana como palavra final.
+6. **Anexos**: a tabela `arquivo` já existe, falta a tela de upload.
 
 ---
 

@@ -11,7 +11,9 @@
     "db:migrate": "node scripts/db.mjs migrate",
     "db:seed": "node scripts/db.mjs seed",
     "db:reset": "node scripts/db.mjs reset",
-    "db:setup": "node scripts/db.mjs migrate && node scripts/db.mjs seed"
+    "db:setup": "node scripts/db.mjs migrate && node scripts/db.mjs seed",
+    "ingerir": "node scripts/ingerir.mjs",
+    "testar:extracao": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-extracao.mjs"
   },
   "dependencies": {
     "next": "^15.5.22",
