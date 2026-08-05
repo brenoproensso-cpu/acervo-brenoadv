@@ -158,3 +158,64 @@ export function formatarCnj(valor?: string | null): string | null {
   if (!d) return valor ?? null;
   return `${d.slice(0, 7)}-${d.slice(7, 9)}.${d.slice(9, 13)}.${d.slice(13, 14)}.${d.slice(14, 16)}.${d.slice(16, 20)}`;
 }
+
+// ---------------------------------------------------------------------
+// Descoberta do tribunal a partir do número CNJ
+// ---------------------------------------------------------------------
+// O formato NNNNNNN-DD.AAAA.J.TR.OOOO carrega o segmento (J) e o tribunal
+// (TR). Isso permite ao coletor descobrir sozinho qual índice do DataJud
+// consultar para cada processo, em vez de exigir que se informe o
+// tribunal a cada chamada.
+//
+// Justiça Federal e do Trabalho são mecânicas (TR = número do TRF/TRT).
+// A Justiça Estadual usa a tabela de códigos da Resolução 65 do CNJ.
+// ---------------------------------------------------------------------
+
+/** Códigos TR da Justiça Estadual (segmento 8). */
+const TJ_POR_CODIGO: Record<string, string> = {
+  "01": "tjac", "02": "tjal", "03": "tjap", "04": "tjam", "05": "tjba",
+  "06": "tjce", "07": "tjdft", "08": "tjes", "09": "tjgo", "10": "tjma",
+  "11": "tjmt", "12": "tjms", "13": "tjmg", "14": "tjpa", "15": "tjpb",
+  "16": "tjpr", "17": "tjpe", "18": "tjpi", "19": "tjrj", "20": "tjrn",
+  "21": "tjrs", "22": "tjro", "23": "tjrr", "24": "tjsc", "25": "tjse",
+  "26": "tjsp", "27": "tjto",
+};
+
+/**
+ * Descobre o índice do DataJud a partir do número CNJ.
+ * Devolve null quando não souber — melhor falhar explicitamente do que
+ * consultar o índice errado e concluir que o processo não existe.
+ */
+export function tribunalDoCnj(numeroCnj: string): string | null {
+  const d = numeroCnj.replace(/\D/g, "");
+  if (d.length !== 20) return null;
+
+  const segmento = d.slice(13, 14);
+  const tr = d.slice(14, 16);
+
+  switch (segmento) {
+    case "1":
+      return "stf";
+    case "3":
+      return "stj";
+    case "4": {
+      // TRF1 a TRF6.
+      const n = Number(tr);
+      return n >= 1 && n <= 6 ? `trf${n}` : null;
+    }
+    case "5": {
+      // TRT1 a TRT24; o código 00 designa o TST.
+      const n = Number(tr);
+      if (n === 0) return "tst";
+      return n >= 1 && n <= 24 ? `trt${n}` : null;
+    }
+    case "6":
+      return Number(tr) === 0 ? "tse" : null;
+    case "7":
+      return "stm";
+    case "8":
+      return TJ_POR_CODIGO[tr] ?? null;
+    default:
+      return null;
+  }
+}

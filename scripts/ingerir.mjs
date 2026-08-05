@@ -40,7 +40,8 @@ if (!fonte || tem("help") || !["djen", "datajud", "pdpj"].includes(fonte)) {
 Uso: npm run ingerir -- <fonte> [opções]
 
   djen      --oab <número> --uf <UF> [--dias 7 | --de AAAA-MM-DD --ate AAAA-MM-DD]
-  datajud   --tribunal <sigla> [--cnj <número>] [--desde AAAA-MM-DD]
+  datajud   --pendentes [--limite 50]   atualiza os processos já cadastrados
+            --cnj <número>                consulta um processo (tribunal sai do número)
   pdpj      --arquivo <documentos.json> | --cnj <número>
 
   --dry-run   mostra o mapeamento sem gravar (use na primeira vez)
@@ -68,11 +69,16 @@ if (fonte === "djen") {
 }
 
 if (fonte === "datajud") {
+  corpo.pendentes = tem("pendentes");
   corpo.tribunal = opcao("tribunal");
   corpo.numeroCnj = opcao("cnj");
   corpo.atualizadoDesde = opcao("desde");
-  if (!corpo.tribunal) {
-    console.error("Informe --tribunal (ex.: trf3, tjsp).");
+  corpo.limite = opcao("limite");
+  if (!corpo.pendentes && !corpo.numeroCnj && !corpo.tribunal) {
+    console.error(
+      "Informe --pendentes (atualiza os processos já cadastrados), " +
+        "--cnj <número> ou --tribunal <sigla>.",
+    );
     process.exit(1);
   }
 }

@@ -24,6 +24,7 @@
  */
 
 import {
+  tribunalDoCnj,
   data,
   instante,
   inteiro,
@@ -34,6 +35,8 @@ import {
   type MovimentoNormalizado,
   type ProcessoNormalizado,
 } from "./tipos";
+
+export { tribunalDoCnj };
 
 const BASE = process.env.DATAJUD_API_URL ?? "https://api-publica.datajud.cnj.jus.br";
 
@@ -97,9 +100,19 @@ export async function buscarProcessos(c: ConsultaDataJud): Promise<{
   });
 
   if (!resposta.ok) {
+    // Um 403 aqui costuma ser proxy corporativo bloqueando o host, não
+    // chave inválida — vale dizer as duas hipóteses para não mandar
+    // ninguém caçar chave nova à toa.
+    const dica =
+      resposta.status === 403
+        ? " Um 403 pode ser a chave desatualizada OU a rede bloqueando" +
+          " api-publica.datajud.cnj.jus.br. Teste o host antes de trocar a chave."
+        : resposta.status === 404
+          ? ` O índice "api_publica_${c.tribunal.toLowerCase()}" não existe — confira a sigla.`
+          : "";
+
     throw new Error(
-      `DataJud respondeu ${resposta.status} para o tribunal "${c.tribunal}". ` +
-        `Confira a sigla do tribunal e se a DATAJUD_API_KEY ainda é a vigente.`,
+      `DataJud respondeu ${resposta.status} para o tribunal "${c.tribunal}".${dica}`,
     );
   }
 
@@ -180,4 +193,39 @@ export const CODIGOS_JULGAMENTO = new Set([
 
 export function temJulgamento(movimentos: MovimentoNormalizado[]): boolean {
   return movimentos.some((m) => m.codigo != null && CODIGOS_JULGAMENTO.has(m.codigo));
+}
+
+/**
+ * Consulta um processo específico, descobrindo o tribunal pelo próprio
+ * número CNJ.
+ *
+ * Este é o modo de uso correto do DataJud para um escritório: consultar
+ * os processos que já se conhece. Varrer um tribunal inteiro não faz
+ * sentido — são milhões de processos, e a API é um bem público
+ * compartilhado.
+ */
+export async function buscarPorNumero(numeroCnj: string): Promise<{
+  tribunal: string | null;
+  itens: unknown[];
+  erro?: string;
+}> {
+  const tribunal = tribunalDoCnj(numeroCnj);
+  if (!tribunal) {
+    return {
+      tribunal: null,
+      itens: [],
+      erro: `Não reconheci o tribunal no número ${numeroCnj}.`,
+    };
+  }
+
+  try {
+    const { itens } = await buscarProcessos({ tribunal, numeroCnj, tamanho: 10 });
+    return { tribunal, itens };
+  } catch (erro) {
+    return {
+      tribunal,
+      itens: [],
+      erro: erro instanceof Error ? erro.message : String(erro),
+    };
+  }
 }

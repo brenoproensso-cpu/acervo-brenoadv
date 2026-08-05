@@ -131,12 +131,21 @@ mas não geram um único ponto no cruzamento "conclusão × desfecho".
 # Publicações dos últimos 7 dias
 npm run ingerir -- djen --oab 123456 --uf SP --dias 7
 
-# Processos e movimentos de um tribunal
-npm run ingerir -- datajud --tribunal trf3 --desde 2026-01-01
+# Atualiza no DataJud todos os processos já cadastrados.
+# O tribunal de cada um sai do próprio número CNJ, então uma execução
+# cobre processos de tribunais diferentes.
+npm run ingerir -- datajud --pendentes
+
+# Um processo específico
+npm run ingerir -- datajud --cnj 1000123-45.2024.4.03.6110
 
 # Documentos de processo (arquivo JSON coletado por qualquer meio)
 npm run ingerir -- pdpj --arquivo documentos.json
 ```
+
+Não existe modo "varrer o tribunal inteiro", de propósito: são milhões de
+processos por índice e a API é um bem público compartilhado. O DataJud serve
+para acompanhar os processos que você já conhece.
 
 **Use `--dry-run` na primeira execução de cada fonte.** Ele mostra como os
 campos foram interpretados sem gravar nada:

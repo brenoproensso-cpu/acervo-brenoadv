@@ -11,6 +11,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { consultar } from "@/lib/db";
 import * as djen from "@/lib/integracoes/djen";
 import * as datajud from "@/lib/integracoes/datajud";
 import * as pdpj from "@/lib/integracoes/pdpj";
@@ -37,6 +38,8 @@ type Corpo = {
   tribunal?: string;
   numeroCnj?: string;
   atualizadoDesde?: string;
+  pendentes?: boolean;
+  limite?: number;
   // PDPJ
   documentos?: unknown[];
 };
@@ -95,7 +98,7 @@ export async function POST(req: Request) {
 
 function escopoDe(c: Corpo): string {
   if (c.fonte === "djen") return `OAB ${c.numeroOab ?? "?"}/${c.ufOab ?? "?"}`;
-  if (c.fonte === "datajud") return c.tribunal ?? "?";
+  if (c.fonte === "datajud") return c.pendentes ? "pendentes" : (c.tribunal ?? c.numeroCnj ?? "?");
   return c.numeroCnj ?? "importacao";
 }
 
@@ -142,11 +145,99 @@ async function ingerirDjen(c: Corpo, dryRun: boolean) {
   return { fonte: "djen", recebidos: itens.length, novos };
 }
 
+/**
+ * Percorre os processos já cadastrados e atualiza cada um no DataJud.
+ *
+ * É assim que o DataJud deve ser usado por um escritório: consultando os
+ * processos que se conhece. O tribunal sai do próprio número CNJ, então
+ * uma execução cobre processos de tribunais diferentes de uma vez.
+ */
+async function sincronizarPendentes(c: Corpo, dryRun: boolean) {
+  const limite = Math.min(Number(c.limite ?? 50), 200);
+
+  const processos = await consultar<{ id: string; numero_cnj: string }>(
+    `select id, numero_cnj from processo
+     where numero_cnj is not null
+       and (sincronizado_em is null or sincronizado_em < now() - interval '1 day')
+     order by sincronizado_em asc nulls first
+     limit $1`,
+    [limite],
+  );
+
+  if (processos.length === 0) {
+    return { fonte: "datajud", mensagem: "Nenhum processo pendente de sincronização." };
+  }
+
+  if (dryRun) {
+    const porTribunal: Record<string, number> = {};
+    let semTribunal = 0;
+    for (const p of processos) {
+      const t = datajud.tribunalDoCnj(p.numero_cnj);
+      if (!t) semTribunal++;
+      else porTribunal[t] = (porTribunal[t] ?? 0) + 1;
+    }
+    return {
+      fonte: "datajud",
+      dryRun: true,
+      processosPendentes: processos.length,
+      porTribunal,
+      semTribunalReconhecido: semTribunal,
+    };
+  }
+
+  let consultados = 0;
+  let encontrados = 0;
+  let movimentos = 0;
+  const falhas: string[] = [];
+
+  for (const p of processos) {
+    const r = await datajud.buscarPorNumero(p.numero_cnj);
+    consultados++;
+
+    if (r.erro) {
+      falhas.push(`${p.numero_cnj}: ${r.erro}`);
+      continue;
+    }
+
+    for (const hit of r.itens) {
+      await gravarBruto(datajud.paraBruto(hit));
+      const n = datajud.normalizar(hit);
+      if (!n) continue;
+      const g = await gravarProcesso(n);
+      if (g.processoId) encontrados++;
+      movimentos += g.movimentosNovos;
+    }
+  }
+
+  await registrarSincronizacao("datajud", "pendentes", {
+    recebidos: consultados,
+    novos: encontrados,
+    erro: falhas.length ? falhas.slice(0, 5).join(" | ") : null,
+  });
+
+  return {
+    fonte: "datajud",
+    consultados,
+    encontrados,
+    movimentosNovos: movimentos,
+    falhas: falhas.slice(0, 10),
+  };
+}
+
 async function ingerirDataJud(c: Corpo, dryRun: boolean) {
-  if (!c.tribunal) throw new Error("Informe o tribunal (ex.: trf3, tjsp).");
+  if (c.pendentes) return sincronizarPendentes(c, dryRun);
+
+  // Com número CNJ, o tribunal é descoberto pelo próprio número.
+  const tribunal = c.tribunal ?? (c.numeroCnj ? datajud.tribunalDoCnj(c.numeroCnj) : null);
+  if (!tribunal) {
+    throw new Error(
+      "Informe --cnj (o tribunal sai do número), --tribunal, ou use --pendentes " +
+        "para atualizar os processos já cadastrados.",
+    );
+  }
 
   const { itens } = await datajud.buscarProcessos({
-    tribunal: c.tribunal,
+    tribunal,
     numeroCnj: c.numeroCnj,
     atualizadoDesde: c.atualizadoDesde,
   });
