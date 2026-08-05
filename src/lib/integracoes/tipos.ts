@@ -160,6 +160,77 @@ export function formatarCnj(valor?: string | null): string | null {
 }
 
 // ---------------------------------------------------------------------
+// Diagnóstico de contrato
+// ---------------------------------------------------------------------
+// Como as APIs do Judiciário não têm contrato estável e nem sempre são
+// documentadas com precisão, o modo --dry-run compara o que a API mandou
+// com o que o normalizador consumiu. Assim uma única execução na máquina
+// certa revela os nomes reais dos campos, sem precisar ler swagger.
+// ---------------------------------------------------------------------
+
+export type Diagnostico = {
+  camposRecebidos: string[];
+  camposUsados: string[];
+  camposIgnorados: string[];
+  camposVaziosNoResultado: string[];
+};
+
+/** Todas as chaves presentes nos itens, inclusive aninhadas (1 nível). */
+export function chavesDe(itens: unknown[], limite = 20): string[] {
+  const chaves = new Set<string>();
+  for (const item of itens.slice(0, limite)) {
+    if (!item || typeof item !== "object") continue;
+    for (const [k, v] of Object.entries(item as Record<string, unknown>)) {
+      chaves.add(k);
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        for (const k2 of Object.keys(v as Record<string, unknown>)) {
+          chaves.add(`${k}.${k2}`);
+        }
+      }
+    }
+  }
+  return [...chaves].sort();
+}
+
+/**
+ * Compara o payload cru com o objeto normalizado e aponta:
+ *  - o que a API mandou e o normalizador ignorou (pode ser dado útil perdido)
+ *  - o que o normalizador tentou preencher e saiu nulo (mapeamento errado)
+ */
+export function diagnosticar(
+  brutos: unknown[],
+  normalizados: Record<string, unknown>[],
+  caminhosConhecidos: string[],
+): Diagnostico {
+  const recebidos = chavesDe(brutos);
+  const usados = new Set(caminhosConhecidos);
+
+  const vazios = new Set<string>();
+  for (const n of normalizados) {
+    for (const [k, v] of Object.entries(n)) {
+      if (v === null || v === undefined || (Array.isArray(v) && v.length === 0)) {
+        vazios.add(k);
+      }
+    }
+  }
+  // Um campo só é problema se saiu vazio em TODAS as amostras.
+  for (const n of normalizados) {
+    for (const [k, v] of Object.entries(n)) {
+      if (v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)) {
+        vazios.delete(k);
+      }
+    }
+  }
+
+  return {
+    camposRecebidos: recebidos,
+    camposUsados: [...usados].sort(),
+    camposIgnorados: recebidos.filter((c) => !usados.has(c)),
+    camposVaziosNoResultado: [...vazios].sort(),
+  };
+}
+
+// ---------------------------------------------------------------------
 // Descoberta do tribunal a partir do número CNJ
 // ---------------------------------------------------------------------
 // O formato NNNNNNN-DD.AAAA.J.TR.OOOO carrega o segmento (J) e o tribunal

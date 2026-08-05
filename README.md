@@ -147,12 +147,48 @@ Não existe modo "varrer o tribunal inteiro", de propósito: são milhões de
 processos por índice e a API é um bem público compartilhado. O DataJud serve
 para acompanhar os processos que você já conhece.
 
-**Use `--dry-run` na primeira execução de cada fonte.** Ele mostra como os
-campos foram interpretados sem gravar nada:
+**Use `--dry-run` na primeira execução de cada fonte.** Além de não gravar
+nada, ele compara o que a API mandou com o que o normalizador consumiu:
 
 ```bash
 npm run ingerir -- djen --oab 123456 --uf SP --dry-run
 ```
+
+```json
+"diagnostico": {
+  "camposQueAApiMandou":  ["dataDisponibilizacao", "meio", "numeroProcesso", ...],
+  "camposQueIgnoramos":   ["meio", "numeroComunicacao"],
+  "camposQueSairamVazios": ["dataPublicacao", "numeroOab", "ufOab"]
+}
+```
+
+- **camposQueIgnoramos** — a API mandou e estamos jogando fora. Se for dado
+  útil, acrescente o nome em `CAMPOS_CONHECIDOS` e leia em `normalizar()`.
+- **camposQueSairamVazios** — esperávamos preencher e não veio nada. Quase
+  sempre é nome de campo diferente do que supusemos: procure o equivalente em
+  `camposQueAApiMandou` e acrescente como alternativa.
+
+Isso dispensa ler o swagger: uma execução na máquina certa revela o contrato.
+
+### Quando a rede bloqueia o host
+
+Firewall corporativo costuma barrar `comunicaapi.pje.jus.br` e
+`api-publica.datajud.cnj.jus.br`. Nesse caso, obtenha o JSON por outro meio e
+importe do arquivo — o resultado é idêntico:
+
+```bash
+npm run ingerir -- djen --arquivo comunicacoes.json
+npm run ingerir -- pdpj --arquivo documentos.json
+```
+
+### Decisões a partir do DJEN
+
+O DJEN publica o **ato**, e o que vem no teor varia por tribunal. Alguns
+publicam a sentença inteira na intimação; outros só avisam que ela existe
+("fica a parte intimada da sentença de fls."). A ingestão trata os dois casos:
+quando o teor traz um dispositivo reconhecível, cria a decisão (sujeita à
+conferência); quando é só aviso, grava a publicação e não inventa decisão
+nenhuma. O retorno diz qual dos dois aconteceu.
 
 A aplicação precisa estar no ar. Para sincronizar por cron, chame direto o
 endpoint `POST /api/ingerir` (proteja com `INGESTAO_TOKEN`).

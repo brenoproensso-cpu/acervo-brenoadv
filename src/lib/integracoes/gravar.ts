@@ -106,7 +106,10 @@ export async function garantirProcesso(
 // DJEN
 // =====================================================================
 
-export async function gravarPublicacao(p: PublicacaoNormalizada): Promise<boolean> {
+export async function gravarPublicacao(p: PublicacaoNormalizada): Promise<{
+  novo: boolean;
+  decisaoCriada: boolean;
+}> {
   const processoId = await garantirProcesso(p.numeroCnj, { fonte: "djen" });
   const prazoDias = estimarPrazoDias(p.tipoComunicacao);
 
@@ -139,7 +142,73 @@ export async function gravarPublicacao(p: PublicacaoNormalizada): Promise<boolea
       prazoDias,
     ],
   );
-  return r !== null;
+
+  if (!r) return { novo: false, decisaoCriada: false };
+
+  // O DJEN publica o ato, não o processo. Na prática isso varia muito:
+  // alguns tribunais publicam a sentença inteira na intimação, outros só
+  // avisam que ela existe ("fica a parte intimada da sentença de fls."").
+  // Quando o teor traz um dispositivo reconhecível, vira decisão — sempre
+  // como extração automática, sujeita à conferência.
+  const decisaoCriada = processoId
+    ? await criarDecisaoDePublicacao(r.id, processoId, p)
+    : false;
+
+  return { novo: true, decisaoCriada };
+}
+
+async function criarDecisaoDePublicacao(
+  publicacaoId: string,
+  processoId: string,
+  p: PublicacaoNormalizada,
+): Promise<boolean> {
+  if (!p.teor || p.teor.length < 120) return false;
+
+  const e = extrairDaDecisao(p.teor);
+  if (!e.resultado) return false;
+
+  // Já existe decisão para este processo com o mesmo resultado e data?
+  // Reexecuções do DJEN não podem multiplicar a mesma sentença.
+  const jaExiste = await consultarUm<{ id: string }>(
+    `select id from decisao
+     where processo_id = $1::uuid
+       and resultado = $2::resultado_julgamento
+       and coalesce(data_decisao, '1900-01-01') = coalesce($3::date, '1900-01-01')
+     limit 1`,
+    [processoId, e.resultado, e.dataDecisao ?? p.dataDisponibilizacao ?? null],
+  );
+  if (jaExiste) return false;
+
+  const proc = await consultarUm<{ numero_cnj: string | null; cliente_nome: string | null }>(
+    "select numero_cnj, cliente_nome from processo where id = $1::uuid",
+    [processoId],
+  );
+
+  await consultar(
+    `insert into decisao (
+       origem, tipo, titulo, processo_id, numero_cnj, tribunal, instancia,
+       data_decisao, data_publicacao, resultado, texto_integral, dispositivo,
+       publicacao_id, fonte, origem_dado, observacoes
+     ) values (
+       'acervo_proprio', 'sentenca', $1, $2::uuid, $3, $4, 'primeiro_grau',
+       $5::date, $6::date, $7::resultado_julgamento, $8, $9,
+       $10::uuid, 'djen', 'extraido_automatico',
+       'Extraída do teor publicado no DJEN. Confira contra o inteiro teor nos autos antes de usar.'
+     )`,
+    [
+      `${p.tipoComunicacao ?? "Publicação"} — ${proc?.cliente_nome ?? proc?.numero_cnj ?? "processo"}`,
+      processoId,
+      proc?.numero_cnj ?? p.numeroCnj ?? null,
+      p.tribunal ?? null,
+      e.dataDecisao ?? p.dataDisponibilizacao ?? null,
+      p.dataPublicacao ?? p.dataDisponibilizacao ?? null,
+      e.resultado,
+      p.teor,
+      e.trecho,
+      publicacaoId,
+    ],
+  );
+  return true;
 }
 
 // =====================================================================

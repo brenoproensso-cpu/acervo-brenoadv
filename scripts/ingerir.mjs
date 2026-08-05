@@ -40,6 +40,7 @@ if (!fonte || tem("help") || !["djen", "datajud", "pdpj"].includes(fonte)) {
 Uso: npm run ingerir -- <fonte> [opções]
 
   djen      --oab <número> --uf <UF> [--dias 7 | --de AAAA-MM-DD --ate AAAA-MM-DD]
+            --arquivo <json>              importa um retorno do DJEN já salvo
   datajud   --pendentes [--limite 50]   atualiza os processos já cadastrados
             --cnj <número>                consulta um processo (tribunal sai do número)
   pdpj      --arquivo <documentos.json> | --cnj <número>
@@ -54,6 +55,14 @@ const base = opcao("url", process.env.APP_URL ?? "http://localhost:3000");
 const corpo = { fonte, dryRun: tem("dry-run") };
 
 if (fonte === "djen") {
+  const arquivo = opcao("arquivo");
+  if (arquivo) {
+    const conteudo = JSON.parse(readFileSync(arquivo, "utf8"));
+    corpo.comunicacoes = Array.isArray(conteudo)
+      ? conteudo
+      : (conteudo.items ?? conteudo.content ?? conteudo.comunicacoes ?? conteudo.data ?? []);
+    console.log(`  ${corpo.comunicacoes.length} comunicação(ões) lidas de ${arquivo}`);
+  }
   const dias = Number(opcao("dias", "7"));
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - dias * 86_400_000);
@@ -62,8 +71,8 @@ if (fonte === "djen") {
   corpo.dataInicio = opcao("de", inicio.toISOString().slice(0, 10));
   corpo.dataFim = opcao("ate", hoje.toISOString().slice(0, 10));
 
-  if (!corpo.numeroOab || !corpo.ufOab) {
-    console.error("Informe --oab e --uf.");
+  if (!corpo.comunicacoes && (!corpo.numeroOab || !corpo.ufOab)) {
+    console.error("Informe --oab e --uf, ou --arquivo <json> com o retorno do DJEN.");
     process.exit(1);
   }
 }

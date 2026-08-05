@@ -132,6 +132,26 @@ export function normalizar(item: unknown): PublicacaoNormalizada {
 }
 
 /**
+ * Nomes de campo que `normalizar()` tenta ler. Serve ao diagnóstico do
+ * --dry-run: o que a API mandou e não está nesta lista é dado que está
+ * sendo jogado fora.
+ */
+export const CAMPOS_CONHECIDOS = [
+  "id", "hash", "idComunicacao",
+  "numeroProcesso", "numero_processo", "numeroCnj", "numeroProcessoMascara",
+  "siglaTribunal", "tribunal", "nomeTribunal",
+  "nomeOrgao", "orgao", "nomeOrgaoJulgador", "orgaoJulgador",
+  "tipoComunicacao", "tipo", "especie", "tipoDocumento",
+  "dataDisponibilizacao", "data_disponibilizacao",
+  "dataPublicacao", "data_publicacao", "dataEnvio",
+  "texto", "teor", "conteudo", "textoComunicacao", "inteiroTeor",
+  "destinatarios", "destinatario", "partes",
+  "destinatarioAdvogados", "advogados", "advogado",
+  "numeroOab", "numero_oab", "ufOab", "uf_oab",
+  "link", "linkCertidao", "certidao",
+];
+
+/**
  * Estima o prazo a partir do tipo de comunicação.
  *
  * Deliberadamente conservador: só sugere quando o tipo é inequívoco, e o

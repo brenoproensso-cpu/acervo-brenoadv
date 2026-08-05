@@ -12,6 +12,7 @@
 
 import { NextResponse } from "next/server";
 import { consultar } from "@/lib/db";
+import { diagnosticar } from "@/lib/integracoes/tipos";
 import * as djen from "@/lib/integracoes/djen";
 import * as datajud from "@/lib/integracoes/datajud";
 import * as pdpj from "@/lib/integracoes/pdpj";
@@ -34,6 +35,7 @@ type Corpo = {
   ufOab?: string;
   dataInicio?: string;
   dataFim?: string;
+  comunicacoes?: unknown[];
   // DataJud
   tribunal?: string;
   numeroCnj?: string;
@@ -105,35 +107,64 @@ function escopoDe(c: Corpo): string {
 // ---------------------------------------------------------------------
 
 async function ingerirDjen(c: Corpo, dryRun: boolean) {
-  if (!c.numeroOab || !c.ufOab || !c.dataInicio || !c.dataFim) {
-    throw new Error("Informe numeroOab, ufOab, dataInicio e dataFim.");
-  }
+  // Dois caminhos, como no PDPJ: consulta direta à API, ou importação de
+  // um payload já obtido por outro meio. O segundo salva quem está atrás
+  // de firewall que bloqueia o host do DJEN.
+  let itens: unknown[];
 
-  const itens = await djen.buscarComunicacoes({
-    numeroOab: c.numeroOab,
-    ufOab: c.ufOab,
-    dataInicio: c.dataInicio,
-    dataFim: c.dataFim,
-  });
+  if (c.comunicacoes?.length) {
+    itens = c.comunicacoes;
+  } else {
+    if (!c.numeroOab || !c.ufOab || !c.dataInicio || !c.dataFim) {
+      throw new Error(
+        "Informe numeroOab, ufOab, dataInicio e dataFim — ou envie `comunicacoes` no corpo.",
+      );
+    }
+    itens = await djen.buscarComunicacoes({
+      numeroOab: c.numeroOab,
+      ufOab: c.ufOab,
+      dataInicio: c.dataInicio,
+      dataFim: c.dataFim,
+    });
+  }
 
   const amostra = itens.slice(0, 3).map(djen.normalizar);
 
   if (dryRun) {
+    const d = diagnosticar(
+      itens,
+      itens.slice(0, 10).map((i) => djen.normalizar(i) as unknown as Record<string, unknown>),
+      djen.CAMPOS_CONHECIDOS,
+    );
     return {
       fonte: "djen",
       dryRun: true,
       recebidos: itens.length,
-      amostraNormalizada: amostra,
+      // O diagnóstico responde sozinho o que o swagger responderia.
+      diagnostico: {
+        camposQueAApiMandou: d.camposRecebidos,
+        camposQueIgnoramos: d.camposIgnorados,
+        camposQueSairamVazios: d.camposVaziosNoResultado,
+      },
+      amostraNormalizada: amostra.map((a) => ({
+        ...a,
+        teor: a.teor ? `${a.teor.slice(0, 400)}…` : null,
+      })),
       aviso:
-        "Confira se os campos vieram preenchidos. Se algum estiver nulo, " +
-        "ajuste o mapeamento em src/lib/integracoes/djen.ts.",
+        d.camposVaziosNoResultado.length > 0
+          ? `Estes saíram vazios em todas as amostras: ${d.camposVaziosNoResultado.join(", ")}. ` +
+            `Compare com "camposQueAApiMandou" e ajuste normalizar() em src/lib/integracoes/djen.ts.`
+          : "Todos os campos vieram preenchidos.",
     };
   }
 
   let novos = 0;
+  let decisoes = 0;
   for (const item of itens) {
     await gravarBruto(djen.paraBruto(item));
-    if (await gravarPublicacao(djen.normalizar(item))) novos++;
+    const g = await gravarPublicacao(djen.normalizar(item));
+    if (g.novo) novos++;
+    if (g.decisaoCriada) decisoes++;
   }
 
   await registrarSincronizacao("djen", escopoDe(c), {
@@ -142,7 +173,15 @@ async function ingerirDjen(c: Corpo, dryRun: boolean) {
     cursor: c.dataFim,
   });
 
-  return { fonte: "djen", recebidos: itens.length, novos };
+  return {
+    fonte: "djen",
+    recebidos: itens.length,
+    novos,
+    decisoesExtraidas: decisoes,
+    aviso: decisoes
+      ? `${decisoes} decisão(ões) reconhecidas no teor publicado, aguardando conferência em /revisao.`
+      : "Nenhum teor trouxe dispositivo reconhecível — este tribunal provavelmente publica só o aviso, não a sentença.",
+  };
 }
 
 /**
