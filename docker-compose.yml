@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: acervo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: acervo
+      POSTGRES_PASSWORD: acervo
+      POSTGRES_DB: acervo
+      # Locale pt_BR não existe na imagem alpine; C.UTF-8 basta, porque a
+      # normalização de acentos é feita por unaccent() e não pelo collation.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - acervo-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acervo -d acervo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  acervo-pgdata:

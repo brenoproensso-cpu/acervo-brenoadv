@@ -1,0 +1,31 @@
+{
+  "name": "acervo-brenoadv",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Acervo jurídico e análise de padrões judiciais — Breno Proenço Advogado",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:migrate": "node scripts/db.mjs migrate",
+    "db:seed": "node scripts/db.mjs seed",
+    "db:reset": "node scripts/db.mjs reset",
+    "db:setup": "node scripts/db.mjs migrate && node scripts/db.mjs seed"
+  },
+  "dependencies": {
+    "next": "^15.5.22",
+    "pg": "^8.13.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.7.2"
+  }
+}
