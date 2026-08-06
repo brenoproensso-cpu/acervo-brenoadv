@@ -12,6 +12,7 @@ const NAV = [
   { href: "/decisoes", texto: "Decisões" },
   { href: "/pecas", texto: "Peças" },
   { href: "/publicacoes", texto: "Publicações" },
+  { href: "/documentos", texto: "Documentos" },
   { href: "/padroes", texto: "Padrões" },
   { href: "/juizo", texto: "Juízo" },
   { href: "/peritos", texto: "Peritos" },

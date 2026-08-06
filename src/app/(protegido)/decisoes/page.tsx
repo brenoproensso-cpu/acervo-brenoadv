@@ -24,6 +24,7 @@ export default async function Decisoes({ searchParams }: { searchParams: Busca }
   const sp = await searchParams;
   const f = {
     q: texto(sp.q),
+    acervo: texto(sp.acervo),
     origem: texto(sp.origem),
     tipo: texto(sp.tipo),
     resultado: texto(sp.resultado),
@@ -61,6 +62,16 @@ export default async function Decisoes({ searchParams }: { searchParams: Busca }
         placeholder="Ementa, dispositivo, inteiro teor, relator…"
         temFiltro={temFiltro}
         campos={[
+          {
+            nome: "acervo",
+            rotulo: "Acervo",
+            valor: f.acervo,
+            opcoes: [
+              { valor: "coleta", texto: "Coleta do juízo (terceiros)" },
+              { valor: "todos", texto: "Tudo junto" },
+            ],
+            vazio: "Do escritório",
+          },
           {
             nome: "origem",
             rotulo: "Origem",
@@ -133,6 +144,22 @@ export default async function Decisoes({ searchParams }: { searchParams: Busca }
                     {d.origem === "jurisprudencia_externa" && (
                       <span className="selo selo-neutro">Referência externa</span>
                     )}
+                    {d.proprio === false && (
+                      <span
+                        className="selo selo-neutro"
+                        title="Processo de terceiro, coletado para medir o comportamento do juízo"
+                      >
+                        Coleta do juízo
+                      </span>
+                    )}
+                    {d.tem_texto === false && (
+                      <span
+                        className="selo selo-neutro"
+                        title="O DataJud entrega o código do julgamento, não o documento"
+                      >
+                        sem íntegra
+                      </span>
+                    )}
                     {Boolean(d.resultado) && (
                       <SeloDesfecho
                         favoravel={d.favoravel as boolean | null}
@@ -204,6 +231,7 @@ export default async function Decisoes({ searchParams }: { searchParams: Busca }
               base="/decisoes"
               params={{
                 q: f.q,
+                acervo: f.acervo,
                 origem: f.origem,
                 tipo: f.tipo,
                 resultado: f.resultado,

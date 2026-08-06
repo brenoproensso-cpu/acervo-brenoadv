@@ -169,6 +169,8 @@ export const listarPeritos = () =>
 
 export type FiltroDecisao = {
   q?: string;
+  /** 'proprio' (padrão), 'coleta' ou 'todos'. */
+  acervo?: string;
   origem?: string;
   tipo?: string;
   resultado?: string;
@@ -181,6 +183,15 @@ export type FiltroDecisao = {
 export async function listarDecisoes(f: FiltroDecisao) {
   const pagina = Math.max(1, f.pagina ?? 1);
   const filtros = new Filtros();
+
+  // Processos coletados para medir o juízo não pertencem ao acervo do
+  // escritório. Sem este recorte, uma coleta de milhares de casos de
+  // terceiros afogaria as decisões próprias na listagem.
+  if (f.acervo === "coleta") {
+    filtros.addCru("pr.proprio is false");
+  } else if (f.acervo !== "todos") {
+    filtros.addCru("coalesce(pr.proprio, true)");
+  }
 
   filtros.add("d.origem = ?::origem_documento", f.origem);
   filtros.add("d.tipo = ?::tipo_documento", f.tipo);
@@ -195,7 +206,8 @@ export async function listarDecisoes(f: FiltroDecisao) {
   const params = [...filtros.params];
 
   const [{ total }] = await consultar<{ total: string }>(
-    `select count(*)::int as total from decisao d ${where}`,
+    `select count(*)::int as total from decisao d
+     left join processo pr on pr.id = d.processo_id ${where}`,
     params,
   );
 
@@ -207,7 +219,10 @@ export async function listarDecisoes(f: FiltroDecisao) {
   const linhas = await consultar(
     `select d.id, d.origem, d.tipo, d.titulo, d.instancia, d.data_decisao,
             d.resultado, d.favoravel, d.tribunal, d.relator, d.numero_cnj,
-            d.nivel_autoridade, d.tags,
+            d.nivel_autoridade, d.tags, d.fonte,
+            coalesce(pr.proprio, true) as proprio,
+            (d.texto_integral is not null or d.ementa is not null) as tem_texto,
+            d.documento_externo_id, d.publicacao_id,
             b.codigo as beneficio_codigo,
             o.nome   as orgao_nome,
             m.nome   as magistrado_nome,
@@ -219,6 +234,7 @@ export async function listarDecisoes(f: FiltroDecisao) {
                         'StartSel=@@R@@,StopSel=@@/R@@,MaxWords=40,MinWords=18,MaxFragments=1')
             end as trecho
      from decisao d
+     left join processo pr      on pr.id = d.processo_id
      left join beneficio b      on b.id = d.beneficio_id
      left join orgao_julgador o on o.id = d.orgao_julgador_id
      left join magistrado m     on m.id = d.magistrado_id
