@@ -109,6 +109,71 @@ demais para orientar decisão.
 
 ---
 
+## Acesso e autenticação
+
+Toda tela exige login. A proteção acontece em duas camadas:
+
+- **Middleware** — quem não traz cookie de sessão vai para `/login` sem custar
+  uma consulta ao banco. Roda no Edge, então só verifica a *presença* do cookie.
+- **Layout do grupo `(protegido)`** — valida de verdade (token existe, não
+  expirou, usuário ativo). Um cookie forjado passa pelo middleware e morre aqui.
+
+No primeiro acesso, com a base sem usuários, a tela de login oferece a criação
+do administrador. Depois disso essa opção some e novos usuários passam a ser
+criados em **Usuários**, por quem tem papel de administrador.
+
+**Senhas** usam scrypt (N=32768, r=8) com sal por usuário. **Tokens de sessão**
+são gravados como hash SHA-256: se o banco vazar, os tokens não servem para
+entrar em conta nenhuma. Cinco senhas erradas bloqueiam a conta por 15 minutos,
+e todo login, falha e saída ficam registrados em `log_acesso` — necessário
+porque a base guarda dado de saúde.
+
+Papéis: `administrador` (gerencia usuários), `advogado` e `colaborador`.
+
+---
+
+## Publicando para acesso remoto
+
+Hospedar o banco não basta: o Next.js precisa rodar em algum lugar. São três
+peças, e as três são obrigatórias.
+
+### 1. Banco — Supabase (ou qualquer Postgres gerenciado)
+
+Crie o projeto, pegue a *connection string* e aplique as migrations:
+
+```bash
+DATABASE_URL='postgresql://...' npm run db:migrate
+```
+
+Use o **Session pooler** (porta 5432) e não a conexão direta: em serverless,
+cada instância abre conexões próprias e a porta direta esgota rápido.
+
+### 2. Aplicação — Vercel
+
+O projeto é Next.js padrão, sem configuração especial. Defina as variáveis:
+
+| Variável | Para quê |
+|---|---|
+| `DATABASE_URL` | conexão com o banco (pooler) |
+| `INGESTAO_TOKEN` | protege `POST /api/ingerir` |
+| `DATAJUD_API_KEY` | chave pública do CNJ |
+| `NODE_ENV=production` | faz o cookie de sessão exigir HTTPS |
+
+### 3. Primeiro acesso
+
+Abra a URL publicada e crie o administrador. Faça isso **imediatamente** após o
+deploy: enquanto não existir usuário, quem chegar primeiro à tela vira o
+administrador.
+
+### Antes de expor
+
+- Senha do banco longa e exclusiva — no Supabase o Postgres fica na internet.
+- Não publique a `service_role` em lugar nenhum; a aplicação não a usa.
+- Os arquivos anexos (`STORAGE_DIR`) não vão para a Vercel, cujo disco é
+  efêmero. Enquanto a tela de upload não existir, isso não bloqueia nada.
+
+---
+
 ## Entrada de dados: DJEN, DataJud e PDPJ
 
 As três fontes entregam coisas diferentes, e essa diferença define o desenho

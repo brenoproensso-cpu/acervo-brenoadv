@@ -12,10 +12,17 @@ function criarPool() {
     );
   }
 
+  // Em ambiente serverless (Vercel) cada instância abre o próprio pool e
+  // elas somam contra o limite de conexões do banco. Por isso o pool fica
+  // pequeno ali — e a connection string deve apontar para o pooler do
+  // Supabase, não para a porta direta do Postgres.
+  const serverless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
   return new Pool({
     connectionString,
-    max: 10,
-    idleTimeoutMillis: 30_000,
+    max: serverless ? 1 : 10,
+    idleTimeoutMillis: serverless ? 10_000 : 30_000,
+    connectionTimeoutMillis: 10_000,
     ssl: /sslmode=require|supabase|neon|render/.test(connectionString)
       ? { rejectUnauthorized: false }
       : undefined,
