@@ -14,7 +14,8 @@
     "db:setup": "node scripts/db.mjs migrate && node scripts/db.mjs seed",
     "ingerir": "node scripts/ingerir.mjs",
     "testar:extracao": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-extracao.mjs",
-    "testar:cnj": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-cnj.mjs"
+    "testar:cnj": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-cnj.mjs",
+    "db:instalador": "node scripts/gerar-instalador.mjs"
   },
   "dependencies": {
     "next": "^15.5.22",
