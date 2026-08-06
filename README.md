@@ -180,7 +180,18 @@ O projeto é Next.js padrão, sem configuração especial. Defina as variáveis:
 | `DATAJUD_API_KEY` | chave pública do CNJ |
 | `NODE_ENV=production` | faz o cookie de sessão exigir HTTPS |
 
-### 3. Primeiro acesso
+### 3. Depois de cada publicação, confira as migrations
+
+Publicar na Vercel **não aplica migration nenhuma** — são passos separados. Se
+o código novo trouxer alteração de estrutura e o banco ficar para trás, as
+telas afetadas quebram.
+
+O sistema avisa: aparece uma tarja vermelha no topo de todas as telas dizendo
+quais migrations faltam. Quando ela aparecer, cole `db/instalar.sql` de novo no
+SQL Editor do Supabase. Reaplicar é seguro — o arquivo só acrescenta o que
+falta.
+
+### 4. Primeiro acesso
 
 Abra a URL publicada e crie o administrador. Faça isso **imediatamente** após o
 deploy: enquanto não existir usuário, quem chegar primeiro à tela vira o

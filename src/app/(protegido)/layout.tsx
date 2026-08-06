@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { usuarioAtual } from "@/lib/auth";
+import { migracoesPendentes } from "@/lib/queries";
 import { MenuUsuario } from "@/components/menu-usuario";
 
 // A verificação de sessão consulta o banco, então nada aqui pode ser
@@ -28,6 +29,12 @@ export default async function LayoutProtegido({
   // Único ponto de verificação: toda tela dentro deste grupo passa por aqui.
   const usuario = await usuarioAtual();
   if (!usuario) redirect("/login");
+
+  // O aviso vive aqui, e não no painel, porque a tela que quebra por
+  // falta de migration pode ser qualquer uma — e em produção o Next não
+  // entrega a mensagem do erro ao navegador, só um dígito. Sem este
+  // aviso, a causa fica invisível justamente onde ela se manifesta.
+  const pendentes = await migracoesPendentes();
 
   return (
     <>
@@ -68,7 +75,28 @@ export default async function LayoutProtegido({
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1400px] px-5 py-7">{children}</main>
+      <main className="mx-auto max-w-[1400px] px-5 py-7">
+        {pendentes.length > 0 && (
+          <div
+            className="cartao mb-5 px-4 py-3 text-sm leading-relaxed"
+            style={{ background: "var(--reves-suave)", color: "var(--reves)" }}
+          >
+            <strong>
+              Banco desatualizado — {pendentes.length} alteração
+              {pendentes.length === 1 ? "" : "ões"} pendente
+              {pendentes.length === 1 ? "" : "s"}.
+            </strong>{" "}
+            O sistema foi publicado com mudanças de estrutura que o banco ainda
+            não recebeu, e algumas telas vão falhar até isso ser aplicado. Copie{" "}
+            <code>db/instalar.sql</code> do repositório e execute no SQL Editor
+            do Supabase. Reaplicar é seguro: o arquivo só acrescenta o que falta.
+            <span className="mt-1 block text-xs opacity-80">
+              Faltando: {pendentes.join(", ")}
+            </span>
+          </div>
+        )}
+        {children}
+      </main>
 
       <footer
         className="mx-auto max-w-[1400px] px-5 pb-10 pt-4 text-xs"

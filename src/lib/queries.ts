@@ -1,4 +1,5 @@
 import { consultar, consultarUm, Filtros } from "./db";
+import { MIGRACOES } from "./migracoes";
 
 export const POR_PAGINA = 20;
 
@@ -53,6 +54,26 @@ export type Resumo = {
 };
 
 export const resumo = () => consultarUm<Resumo>("select * from vw_acervo_resumo");
+
+/**
+ * Migrations que o código espera e o banco ainda não tem.
+ *
+ * Publicar a aplicação não aplica migration nenhuma: são passos
+ * separados, e esquecer o segundo derruba as telas com erro que não
+ * explica nada. Este aviso troca a quebra por uma instrução.
+ */
+export async function migracoesPendentes(): Promise<string[]> {
+  const aplicadas = await consultar<{ versao: string }>(
+    "select versao from schema_migrations",
+  ).catch(() => null);
+
+  // Sem a tabela de controle não dá para afirmar nada; o erro real, se
+  // houver, aparece na própria tela que falhar.
+  if (!aplicadas) return [];
+
+  const tem = new Set(aplicadas.map((a) => a.versao));
+  return MIGRACOES.filter((m) => !tem.has(m));
+}
 
 export const exitoMensal = () =>
   consultar(

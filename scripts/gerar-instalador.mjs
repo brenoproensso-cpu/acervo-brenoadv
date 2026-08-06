@@ -82,5 +82,17 @@ order by table_name;
 
 writeFileSync(destino, partes.join("\n"));
 
+// A aplicação precisa saber qual é a última migration para avisar quando o
+// banco estiver atrás do código. Gerar isto aqui evita que a constante fique
+// desatualizada — ela nasce do mesmo diretório que o instalador.
+writeFileSync(
+  join(raiz, "src", "lib", "migracoes.ts"),
+  `// GERADO por scripts/gerar-instalador.mjs. Não edite à mão.
+export const MIGRACOES = ${JSON.stringify(arquivos, null, 2)} as const;
+
+export const ULTIMA_MIGRACAO = ${JSON.stringify(arquivos[arquivos.length - 1])};
+`,
+);
+
 const linhas = partes.join("\n").split("\n").length;
 console.log(`db/instalar.sql gerado: ${arquivos.length} migrations, ${linhas} linhas.`);
