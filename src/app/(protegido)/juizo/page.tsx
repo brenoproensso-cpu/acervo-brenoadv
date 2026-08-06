@@ -4,6 +4,7 @@ import { consultar } from "@/lib/db";
 import { dataBR, num, pct } from "@/lib/labels";
 import { AvisoAmostra, BarraDesfecho, Cartao, TituloPagina, Vazio } from "@/components/ui";
 import { FormularioColeta } from "./coleta";
+import { FormularioSentencas } from "./sentencas";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +32,13 @@ export default async function Juizo() {
         className="cartao mb-5 px-4 py-3 text-sm leading-relaxed"
         style={{ background: "var(--papel-2)" }}
       >
-        Os desfechos aqui vêm do <strong>código de movimento da Tabela
-        Processual Unificada</strong>, que o DataJud entrega como campo
-        estruturado — não de leitura de texto. O que o DataJud{" "}
-        <strong>não</strong> traz é o nome do magistrado nem o teor da sentença:
-        a unidade de medida é o órgão julgador. Em vara de juiz único isso
-        equivale ao magistrado; em vara com titular e substituto, não.
+        Duas fontes alimentam esta tela. O <strong>DJEN</strong> traz o teor
+        publicado das sentenças — dá para ler a fundamentação, e o desfecho é
+        lido do dispositivo. O <strong>DataJud</strong> não traz texto, mas
+        entrega o código oficial do julgamento e cobre todo o acervo do
+        tribunal, servindo para volume. Nenhuma das duas nomeia o magistrado em
+        campo próprio: no DJEN ele é procurado dentro do texto; no DataJud a
+        unidade é o órgão julgador.
       </div>
 
       {comparativo.length === 0 ? (
@@ -159,7 +161,23 @@ export default async function Juizo() {
 
       {podeColetar && (
         <>
-          <h2 className="display mb-3 text-lg font-semibold">Coletar uma vara</h2>
+          <h2 className="display mb-1 text-lg font-semibold">
+            Buscar sentenças no DJEN
+          </h2>
+          <p className="mb-3 text-sm" style={{ color: "var(--tinta-2)" }}>
+            Traz o <strong>teor publicado</strong> das sentenças de uma vara ou de
+            um magistrado. É a coleta que permite estudar fundamentação.
+          </p>
+          <FormularioSentencas />
+
+          <h2 className="display mb-1 mt-8 text-lg font-semibold">
+            Contar desfechos no DataJud
+          </h2>
+          <p className="mb-3 text-sm" style={{ color: "var(--tinta-2)" }}>
+            Sem texto, mas com o <strong>código oficial do julgamento</strong> e
+            cobertura de todo o acervo do tribunal. É a coleta que dá volume
+            estatístico.
+          </p>
           <FormularioColeta />
         </>
       )}

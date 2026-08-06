@@ -290,3 +290,28 @@ export function tribunalDoCnj(numeroCnj: string): string | null {
       return null;
   }
 }
+
+/** Minúsculas, sem acento, espaços colapsados — para comparação. */
+export function normalizarTexto(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Um teor só interessa como sentença se de fato contiver o julgamento.
+ * Intimação de despacho e ato ordinatório entram no mesmo diário e
+ * precisam ficar de fora, senão a estatística conta expediente como
+ * decisão.
+ */
+export function pareceDecisao(teor: string | null | undefined): boolean {
+  if (!teor || teor.length < 200) return false;
+  const t = normalizarTexto(teor);
+  return (
+    /\b(julgo|julga-se|homologo|extingo|dou provimento|nego provimento|condeno)\b/.test(t) &&
+    /\b(ante o exposto|diante do exposto|isso posto|pelo exposto|dispositivo|em face do exposto)\b/.test(t)
+  );
+}

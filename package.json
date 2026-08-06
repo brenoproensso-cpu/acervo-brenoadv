@@ -15,7 +15,8 @@
     "ingerir": "node scripts/ingerir.mjs",
     "testar:extracao": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-extracao.mjs",
     "testar:cnj": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-cnj.mjs",
-    "db:instalador": "node scripts/gerar-instalador.mjs"
+    "db:instalador": "node scripts/gerar-instalador.mjs",
+    "testar:djen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-djen.mjs"
   },
   "dependencies": {
     "next": "^15.5.22",

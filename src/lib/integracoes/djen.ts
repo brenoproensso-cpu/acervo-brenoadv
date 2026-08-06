@@ -1,15 +1,20 @@
 /**
  * DJEN — Diário de Justiça Eletrônico Nacional.
  *
- * Fonte das comunicações e intimações. Consulta-se por OAB e intervalo de
- * datas; o retorno traz o teor do ato publicado.
+ * Fonte das comunicações e intimações, com o TEOR do ato publicado.
  *
- * O QUE ESTA FONTE ENTREGA: o texto da comunicação — geralmente a
- * intimação com o dispositivo da decisão. Serve para acompanhar andamento
- * e contar prazo.
+ * Dois usos, no mesmo endpoint:
  *
- * O QUE NÃO ENTREGA: inteiro teor de sentença, petições e laudo pericial.
- * Isso vem do PDPJ.
+ *   1. Por OAB — acompanhar os próprios processos e prazos.
+ *   2. Por órgão julgador e período — reunir as sentenças proferidas por
+ *      uma vara, COM o conteúdo. É o caminho para estudar como aquele
+ *      juízo fundamenta, e não apenas quanto ele concede.
+ *
+ * O que o DJEN publica varia por tribunal: alguns trazem a sentença
+ * inteira na intimação, outros só avisam que ela existe. `pareceDecisao`
+ * separa os dois casos.
+ *
+ * Petições e laudo pericial continuam fora — isso só o PDPJ entrega.
  *
  * ---------------------------------------------------------------------
  * ATENÇÃO AO CONTRATO
@@ -28,6 +33,8 @@
  */
 
 import {
+  normalizarTexto,
+  pareceDecisao,
   data,
   lista,
   texto,
@@ -35,6 +42,8 @@ import {
   type Bruto,
   type PublicacaoNormalizada,
 } from "./tipos";
+
+export { pareceDecisao };
 
 const BASE = process.env.DJEN_API_URL ?? "https://comunicaapi.pje.jus.br/api/v1";
 
@@ -167,4 +176,120 @@ export function estimarPrazoDias(tipoComunicacao?: string | null): number | null
   if (t.includes("recurso inominado")) return 10;
   if (t.includes("apelação") || t.includes("apelacao")) return 15;
   return null;
+}
+
+// =====================================================================
+// Busca por órgão julgador — sentenças de uma vara num período
+// =====================================================================
+// O mesmo endpoint de consulta aceita recorte por tribunal, órgão e
+// intervalo de datas, e devolve o TEOR publicado. É o caminho para
+// "sentenças proferidas pela vara tal entre X e Y", com conteúdo.
+//
+// Como não foi possível conferir a documentação do endpoint deste
+// ambiente (a rede bloqueia o host), a estratégia é dupla: manda-se o
+// filtro ao servidor E aplica-se o mesmo recorte sobre o que voltou.
+// Se o parâmetro existir, a busca vem estreita; se não existir, o
+// servidor ignora e o recorte acontece aqui. Nos dois casos o resultado
+// é o mesmo — só muda quanto tráfego foi gasto.
+// =====================================================================
+
+export type ConsultaOrgaoDjen = {
+  tribunal?: string;
+  orgao?: string;
+  /** Filtra pelo nome do magistrado dentro do teor publicado. */
+  magistrado?: string;
+  /** Palavras que precisam aparecer no teor. */
+  contendo?: string;
+  dataInicio: string;
+  dataFim: string;
+  paginas?: number;
+  itensPorPagina?: number;
+};
+
+export async function buscarPorOrgao(c: ConsultaOrgaoDjen): Promise<{
+  itens: unknown[];
+  paginasLidas: number;
+  totalBruto: number;
+}> {
+  const token = process.env.DJEN_API_TOKEN;
+  const paginas = Math.min(Math.max(c.paginas ?? 3, 1), 30);
+  const porPagina = Math.min(c.itensPorPagina ?? 100, 100);
+
+  const coletado: unknown[] = [];
+  let totalBruto = 0;
+  let lidas = 0;
+
+  for (let pagina = 1; pagina <= paginas; pagina++) {
+    const params = new URLSearchParams({
+      dataDisponibilizacaoInicio: c.dataInicio,
+      dataDisponibilizacaoFim: c.dataFim,
+      pagina: String(pagina),
+      itensPorPagina: String(porPagina),
+    });
+
+    // Filtros que o servidor pode ou não conhecer. Se ignorar, o recorte
+    // acontece adiante, sobre o que voltou.
+    if (c.tribunal) params.set("siglaTribunal", c.tribunal.toUpperCase());
+    if (c.orgao) {
+      params.set("nomeOrgao", c.orgao);
+      params.set("orgao", c.orgao);
+    }
+    if (c.contendo) params.set("texto", c.contendo);
+
+    const resposta = await fetch(`${BASE}/comunicacao?${params}`, {
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    if (!resposta.ok) {
+      if (pagina === 1) {
+        throw new Error(
+          `DJEN respondeu ${resposta.status} ${resposta.statusText}. ` +
+            `Confira tribunal e intervalo de datas.`,
+        );
+      }
+      break;
+    }
+
+    const json = (await resposta.json()) as unknown;
+    const itens = Array.isArray(json)
+      ? json
+      : lista(json, "items", "content", "data", "comunicacoes", "resultado");
+
+    lidas++;
+    totalBruto += itens.length;
+    coletado.push(...itens);
+
+    if (itens.length < porPagina) break;
+  }
+
+  return { itens: coletado, paginasLidas: lidas, totalBruto };
+}
+
+/**
+ * Aplica o recorte fino sobre o que voltou: órgão, magistrado e teor.
+ *
+ * O nome do magistrado é procurado dentro do texto publicado, porque o
+ * DJEN identifica o órgão, não quem assinou — mas quem assinou costuma
+ * constar da própria sentença.
+ */
+export function filtrar(
+  itens: unknown[],
+  c: Pick<ConsultaOrgaoDjen, "orgao" | "magistrado" | "contendo">,
+): PublicacaoNormalizada[] {
+  const orgaoAlvo = c.orgao ? normalizarTexto(c.orgao) : null;
+  const magistradoAlvo = c.magistrado ? normalizarTexto(c.magistrado) : null;
+  const contendoAlvo = c.contendo ? normalizarTexto(c.contendo) : null;
+
+  return itens
+    .map(normalizar)
+    .filter((p) => {
+      if (orgaoAlvo && !normalizarTexto(p.orgao ?? "").includes(orgaoAlvo)) return false;
+      const teor = normalizarTexto(p.teor ?? "");
+      if (magistradoAlvo && !teor.includes(magistradoAlvo)) return false;
+      if (contendoAlvo && !teor.includes(contendoAlvo)) return false;
+      return true;
+    });
 }

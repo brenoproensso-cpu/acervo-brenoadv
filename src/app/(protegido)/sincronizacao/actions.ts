@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { usuarioAtual } from "@/lib/auth";
-import { coletarOrgao, executarIngestao, type Corpo } from "@/lib/integracoes/executar";
+import {
+  coletarDjenPorOrgao,
+  coletarOrgao,
+  executarIngestao,
+  type Corpo,
+} from "@/lib/integracoes/executar";
 
 /**
  * Dispara a ingestão a partir da tela, com a sessão do usuário como
@@ -103,6 +108,54 @@ export async function coletar(_estado: unknown, form: FormData) {
     });
     revalidatePath("/sincronizacao");
     revalidatePath("/juizo");
+    return { ok: true, resultado };
+  } catch (erro) {
+    return { erro: erro instanceof Error ? erro.message : "Falha na coleta." };
+  }
+}
+
+
+/**
+ * Reúne sentenças de uma vara (ou de um magistrado) no DJEN, com o teor.
+ *
+ * É a coleta que permite estudar fundamentação: diferente do DataJud,
+ * que devolve só o código do julgamento, aqui vem o texto publicado.
+ */
+export async function coletarSentencas(_estado: unknown, form: FormData) {
+  const eu = await usuarioAtual();
+  if (!eu || eu.papel === "colaborador") {
+    return { erro: "Sem permissão para coletar." };
+  }
+
+  const t = (n: string) => {
+    const v = String(form.get(n) ?? "").trim();
+    return v || undefined;
+  };
+
+  const dias = Math.min(Math.max(Number(form.get("dias") ?? 30), 1), 365);
+  const hoje = new Date();
+  const dataFim = t("ate") ?? hoje.toISOString().slice(0, 10);
+  const dataInicio =
+    t("de") ?? new Date(hoje.getTime() - dias * 86_400_000).toISOString().slice(0, 10);
+
+  if (!t("orgao") && !t("magistrado") && !t("contendo")) {
+    return { erro: "Informe a vara, o magistrado ou um termo do teor." };
+  }
+
+  try {
+    const resultado = await coletarDjenPorOrgao({
+      tribunal: t("tribunal"),
+      orgao: t("orgao"),
+      magistrado: t("magistrado"),
+      contendo: t("contendo"),
+      dataInicio,
+      dataFim,
+      paginas: Math.min(Math.max(Number(form.get("paginas") ?? 3), 1), 30),
+      somenteDecisoes: form.get("somente_decisoes") !== "off",
+      dryRun: form.get("dry_run") === "on",
+    });
+    revalidatePath("/juizo");
+    revalidatePath("/decisoes");
     return { ok: true, resultado };
   } catch (erro) {
     return { erro: erro instanceof Error ? erro.message : "Falha na coleta." };

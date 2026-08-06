@@ -20,7 +20,9 @@ import {
   registrarSincronizacao,
   gravarProcessoBenchmark,
   garantirOrgao,
+  gravarSentencaColetada,
 } from "@/lib/integracoes/gravar";
+import { extrairDaDecisao } from "@/lib/integracoes/extracao";
 
 export { registrarSincronizacao };
 
@@ -477,5 +479,132 @@ export async function coletarOrgao(p: ColetaOrgao) {
     processosNovos: novos,
     comDesfecho: comDecisao,
     movimentosNovos: movimentos,
+  };
+}
+
+// =====================================================================
+// Coleta de sentenças no DJEN — por vara ou por magistrado, com teor
+// =====================================================================
+
+export type ColetaDjen = {
+  tribunal?: string;
+  orgao?: string;
+  magistrado?: string;
+  contendo?: string;
+  dataInicio: string;
+  dataFim: string;
+  paginas?: number;
+  somenteDecisoes?: boolean;
+  dryRun?: boolean;
+};
+
+/**
+ * Reúne as sentenças publicadas por uma vara (ou assinadas por um
+ * magistrado) num período, guardando o teor.
+ *
+ * Diferente da coleta do DataJud, aqui vem TEXTO — o que permite estudar
+ * fundamentação, e não só contar procedência. Em troca, o desfecho é
+ * inferido do dispositivo, então cada decisão carrega grau de confiança.
+ */
+export async function coletarDjenPorOrgao(c: ColetaDjen) {
+  if (!c.orgao && !c.magistrado && !c.contendo) {
+    throw new Error(
+      "Informe ao menos um recorte: órgão julgador, magistrado ou termo no teor.",
+    );
+  }
+
+  const bruto = await djen.buscarPorOrgao({
+    tribunal: c.tribunal,
+    orgao: c.orgao,
+    contendo: c.contendo,
+    dataInicio: c.dataInicio,
+    dataFim: c.dataFim,
+    paginas: c.paginas ?? 3,
+  });
+
+  const filtrados = djen.filtrar(bruto.itens, {
+    orgao: c.orgao,
+    magistrado: c.magistrado,
+    contendo: c.contendo,
+  });
+
+  const somenteDecisoes = c.somenteDecisoes !== false;
+  const candidatas = somenteDecisoes
+    ? filtrados.filter((p) => djen.pareceDecisao(p.teor))
+    : filtrados;
+
+  if (c.dryRun) {
+    const porOrgao: Record<string, number> = {};
+    for (const p of filtrados) {
+      const k = p.orgao ?? "(sem órgão)";
+      porOrgao[k] = (porOrgao[k] ?? 0) + 1;
+    }
+
+    const porResultado: Record<string, number> = {};
+    for (const p of candidatas) {
+      const e = extrairDaDecisao(p.teor);
+      const k = e.resultado ?? "não reconhecido";
+      porResultado[k] = (porResultado[k] ?? 0) + 1;
+    }
+
+    return {
+      fonte: "djen",
+      modo: "coleta_orgao",
+      dryRun: true,
+      paginasLidas: bruto.paginasLidas,
+      publicacoesNoPeriodo: bruto.totalBruto,
+      aposFiltro: filtrados.length,
+      comAparenciaDeDecisao: candidatas.length,
+      porOrgao,
+      porResultado,
+      amostra: candidatas.slice(0, 3).map((p) => ({
+        numeroCnj: p.numeroCnj,
+        orgao: p.orgao,
+        data: p.dataDisponibilizacao,
+        tipo: p.tipoComunicacao,
+        teor: p.teor ? `${p.teor.slice(0, 600)}…` : null,
+      })),
+      aviso:
+        filtrados.length === 0
+          ? "Nada casou com o recorte. Veja `porOrgao` numa busca sem filtro de " +
+            "órgão para descobrir a grafia exata que o tribunal usa."
+          : candidatas.length === 0
+            ? "Publicações encontradas, mas nenhuma com cara de sentença — este " +
+              "tribunal provavelmente publica só o aviso, não o inteiro teor."
+            : `${candidatas.length} sentenças com teor, de ${bruto.totalBruto} publicações lidas.`,
+    };
+  }
+
+  let novas = 0;
+  let decisoes = 0;
+
+  for (const p of candidatas) {
+    await gravarBruto({
+      fonte: "djen",
+      tipo: "comunicacao",
+      idExterno: p.idExterno,
+      numeroCnj: p.numeroCnj,
+      payload: p,
+    });
+    const r = await gravarSentencaColetada(p, c.orgao ?? p.orgao ?? null, c.tribunal ?? null);
+    if (r.novo) novas++;
+    if (r.decisaoCriada) decisoes++;
+  }
+
+  await registrarSincronizacao("djen", `órgão: ${c.orgao ?? c.magistrado ?? c.contendo}`, {
+    recebidos: candidatas.length,
+    novos: novas,
+  });
+
+  return {
+    fonte: "djen",
+    modo: "coleta_orgao",
+    paginasLidas: bruto.paginasLidas,
+    publicacoesLidas: bruto.totalBruto,
+    aposFiltro: filtrados.length,
+    comAparenciaDeDecisao: candidatas.length,
+    processosNovos: novas,
+    decisoesGravadas: decisoes,
+    aviso: `${decisoes} sentenças gravadas com inteiro teor. Veja em Decisões, filtro "Coleta do juízo".`,
   };
 }

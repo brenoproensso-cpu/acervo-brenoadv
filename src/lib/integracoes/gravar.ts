@@ -619,3 +619,96 @@ export async function garantirOrgao(
   );
   return novo?.id ?? null;
 }
+
+/**
+ * Grava uma sentença coletada do DJEN — processo de terceiro, com teor.
+ *
+ * O desfecho vem da leitura do dispositivo, então carrega a mesma
+ * ressalva de qualquer extração de texto. Diferente dos laudos, porém,
+ * estas decisões entram nas contas de comportamento do juízo sem fila de
+ * conferência: são centenas de casos alheios usados para medir tendência,
+ * e um erro isolado não move a agulha do jeito que moveria a taxa de um
+ * perito medida sobre vinte casos. A tela de Juízo informa quantas vieram
+ * de leitura de texto e quantas de código estruturado.
+ */
+export async function gravarSentencaColetada(
+  p: PublicacaoNormalizada,
+  orgaoNome: string | null,
+  tribunal: string | null,
+): Promise<{ novo: boolean; decisaoCriada: boolean }> {
+  const e = extrairDaDecisao(p.teor);
+  if (!e.resultado) return { novo: false, decisaoCriada: false };
+
+  const orgaoId = await garantirOrgao(
+    orgaoNome ?? p.orgao ?? null,
+    tribunal ?? p.tribunal ?? null,
+    null,
+  );
+
+  // Sem número de processo não há como deduplicar; o teor sozinho não
+  // identifica o caso.
+  if (!p.numeroCnj) return { novo: false, decisaoCriada: false };
+
+  const digitos = p.numeroCnj.replace(/\D/g, "");
+  if (digitos.length !== 20) return { novo: false, decisaoCriada: false };
+
+  const existente = await consultarUm<{ id: string; proprio: boolean }>(
+    `select id, proprio from processo
+     where regexp_replace(coalesce(numero_cnj,''),'\\D','','g') = $1 limit 1`,
+    [digitos],
+  );
+
+  // Processo do escritório não vira população de referência.
+  if (existente?.proprio) return { novo: false, decisaoCriada: false };
+
+  let processoId = existente?.id ?? null;
+  if (!processoId) {
+    const novo = await consultarUm<{ id: string }>(
+      `insert into processo (numero_cnj, proprio, fonte, orgao_julgador_id, status)
+       values ($1, false, 'djen', $2::uuid, 'coletado')
+       on conflict (numero_cnj) do update set sincronizado_em = now()
+       returning id`,
+      [p.numeroCnj, orgaoId],
+    );
+    processoId = novo?.id ?? null;
+  }
+  if (!processoId) return { novo: false, decisaoCriada: false };
+
+  const dataDecisao = e.dataDecisao ?? p.dataDisponibilizacao ?? null;
+
+  const jaTem = await consultarUm<{ id: string }>(
+    `select id from decisao
+     where processo_id = $1::uuid and resultado = $2::resultado_julgamento
+       and coalesce(data_decisao,'1900-01-01') = coalesce($3::date,'1900-01-01')
+     limit 1`,
+    [processoId, e.resultado, dataDecisao],
+  );
+  if (jaTem) return { novo: !existente, decisaoCriada: false };
+
+  await consultar(
+    `insert into decisao (
+       origem, tipo, titulo, processo_id, numero_cnj, orgao_julgador_id, tribunal,
+       instancia, data_decisao, data_publicacao, resultado, texto_integral,
+       dispositivo, fonte, origem_dado, observacoes
+     ) values (
+       'acervo_proprio', 'sentenca', $1, $2::uuid, $3, $4::uuid, $5,
+       'primeiro_grau', $6::date, $7::date, $8::resultado_julgamento, $9,
+       $10, 'djen', 'extraido_automatico',
+       'Sentença de terceiro, coletada do DJEN para medir o juízo. Desfecho lido do dispositivo.'
+     )`,
+    [
+      `${p.orgao ?? "Sentença"} — ${p.numeroCnj}`,
+      processoId,
+      p.numeroCnj,
+      orgaoId,
+      tribunal ?? p.tribunal,
+      dataDecisao,
+      p.dataPublicacao ?? p.dataDisponibilizacao,
+      e.resultado,
+      p.teor,
+      e.trecho,
+    ],
+  );
+
+  return { novo: !existente, decisaoCriada: true };
+}
