@@ -178,21 +178,147 @@ function normalizarMovimento(m: unknown): MovimentoNormalizado {
 }
 
 /**
- * Códigos da TPU que indicam julgamento de mérito. Servem para localizar
- * na linha do tempo o momento em que vale a pena buscar a sentença no
- * PDPJ, em vez de baixar todos os documentos de todos os processos.
+ * Códigos da Tabela Processual Unificada que expressam o desfecho.
+ *
+ * É daqui que sai a análise de comportamento do juízo: o DataJud não
+ * entrega o texto da sentença, mas entrega o CÓDIGO do julgamento — que
+ * é dado estruturado do CNJ, não interpretação de texto. Para medir
+ * "quantas vezes esta vara julga procedente", isso basta e é mais
+ * confiável do que ler dispositivo.
+ *
+ * A tabela é deliberadamente CURTA. Só entram códigos de que se tem
+ * certeza, porque classificar errado corromperia exatamente o número que
+ * a ferramenta existe para produzir — melhor deixar um caso de fora do
+ * que contá-lo como o contrário do que foi.
+ *
+ * Todos os movimentos ficam gravados em `movimento`, e o modo de teste
+ * reporta os códigos mais frequentes que ainda não estão aqui. É assim
+ * que a tabela cresce: conferindo o código real contra a TPU e
+ * acrescentando — sem precisar recoletar nada.
  */
-export const CODIGOS_JULGAMENTO = new Set([
-  219, // Procedência
-  220, // Improcedência
-  221, // Procedência em parte
-  237, // Homologação de acordo
-  455, // Julgamento
-  461, // Homologação de transação
-]);
+export const RESULTADO_POR_CODIGO: Record<number, string> = {
+  219: "procedente",
+  220: "improcedente",
+  221: "parcialmente_procedente",
+};
+
+export const CODIGOS_JULGAMENTO = new Set(
+  Object.keys(RESULTADO_POR_CODIGO).map(Number),
+);
 
 export function temJulgamento(movimentos: MovimentoNormalizado[]): boolean {
   return movimentos.some((m) => m.codigo != null && CODIGOS_JULGAMENTO.has(m.codigo));
+}
+
+/**
+ * Extrai o desfecho da linha do tempo: o movimento de julgamento mais
+ * recente que o sistema saiba classificar.
+ */
+export function desfechoDosMovimentos(movimentos: MovimentoNormalizado[]): {
+  resultado: string;
+  dataDecisao: string | null;
+  codigo: number;
+  nome: string | null;
+} | null {
+  const julgamentos = movimentos
+    .filter((m) => m.codigo != null && RESULTADO_POR_CODIGO[m.codigo])
+    .sort((a, b) => String(b.dataHora ?? "").localeCompare(String(a.dataHora ?? "")));
+
+  const m = julgamentos[0];
+  if (!m || m.codigo == null) return null;
+
+  return {
+    resultado: RESULTADO_POR_CODIGO[m.codigo],
+    dataDecisao: m.dataHora ? m.dataHora.slice(0, 10) : null,
+    codigo: m.codigo,
+    nome: m.nome ?? null,
+  };
+}
+
+/**
+ * Busca processos de um órgão julgador num período — a consulta que
+ * responde "como esta vara vem decidindo".
+ *
+ * O filtro de período usa a data de ajuizamento, porque é campo de
+ * primeiro nível no índice. A data do JULGAMENTO vive dentro do array de
+ * movimentos e nem sempre é indexada de forma consultável, então esse
+ * recorte é aplicado depois, sobre o que voltou.
+ */
+export async function buscarPorOrgao(p: {
+  tribunal: string;
+  orgao?: string;
+  codigoOrgao?: number;
+  classe?: string;
+  ajuizadoDe?: string;
+  ajuizadoAte?: string;
+  tamanho?: number;
+  searchAfter?: unknown[];
+}): Promise<{ itens: unknown[]; total: number; proximoCursor: unknown[] | null }> {
+  const chave = process.env.DATAJUD_API_KEY;
+  if (!chave) {
+    throw new Error(
+      "DATAJUD_API_KEY não definida. A chave pública do DataJud é divulgada " +
+        "pelo CNJ; defina-a nas variáveis de ambiente.",
+    );
+  }
+
+  const must: unknown[] = [];
+
+  if (p.codigoOrgao) {
+    must.push({ term: { "orgaoJulgador.codigo": p.codigoOrgao } });
+  } else if (p.orgao) {
+    // match_phrase evita que "1ª Vara Federal" traga toda vara federal.
+    must.push({ match_phrase: { "orgaoJulgador.nome": p.orgao } });
+  }
+
+  if (p.classe) must.push({ match_phrase: { "classe.nome": p.classe } });
+
+  if (p.ajuizadoDe || p.ajuizadoAte) {
+    must.push({
+      range: {
+        dataAjuizamento: {
+          ...(p.ajuizadoDe ? { gte: p.ajuizadoDe } : {}),
+          ...(p.ajuizadoAte ? { lte: p.ajuizadoAte } : {}),
+        },
+      },
+    });
+  }
+
+  const corpo: Record<string, unknown> = {
+    size: Math.min(p.tamanho ?? 100, 500),
+    track_total_hits: true,
+    query: must.length ? { bool: { must } } : { match_all: {} },
+    sort: [{ "@timestamp": { order: "asc" } }],
+  };
+  if (p.searchAfter) corpo.search_after = p.searchAfter;
+
+  const resposta = await fetch(endpoint(p.tribunal), {
+    method: "POST",
+    headers: {
+      Authorization: `APIKey ${chave}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(corpo),
+  });
+
+  if (!resposta.ok) {
+    const dica =
+      resposta.status === 403
+        ? " Pode ser a chave desatualizada OU a rede bloqueando o host."
+        : resposta.status === 404
+          ? ` O índice "api_publica_${p.tribunal.toLowerCase()}" não existe — confira a sigla.`
+          : "";
+    throw new Error(`DataJud respondeu ${resposta.status}.${dica}`);
+  }
+
+  const json = (await resposta.json()) as Record<string, unknown>;
+  const hits = lista(json, "hits.hits");
+  const ultimo = hits[hits.length - 1] as Record<string, unknown> | undefined;
+  const total = Number(
+    (json as { hits?: { total?: { value?: number } } })?.hits?.total?.value ?? hits.length,
+  );
+
+  return { itens: hits, total, proximoCursor: (ultimo?.sort as unknown[]) ?? null };
 }
 
 /**

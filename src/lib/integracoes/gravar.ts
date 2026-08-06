@@ -8,6 +8,7 @@
 
 import { consultar, consultarUm } from "@/lib/db";
 import { extrairDaDecisao, extrairDoLaudo } from "./extracao";
+import { desfechoDosMovimentos } from "./datajud";
 import { estimarPrazoDias } from "./djen";
 import type {
   Bruto,
@@ -482,4 +483,139 @@ export async function registrarSincronizacao(
        erro             = $6`,
     [fonte, escopo, dados.cursor ?? null, dados.recebidos, dados.novos, dados.erro ?? null],
   );
+}
+
+// =====================================================================
+// Coleta de referência: processos de terceiros, para medir o juízo
+// =====================================================================
+
+/**
+ * Grava um processo coletado do DataJud com `proprio = false` e deriva a
+ * decisão a partir do código de movimento da TPU.
+ *
+ * Diferente do laudo e da sentença lidos por texto, aqui o desfecho vem
+ * de campo estruturado do CNJ. Por isso entra como `importado` e conta
+ * nas estatísticas sem fila de conferência — não há o que um humano
+ * confirmaria olhando, além do próprio código.
+ */
+export async function gravarProcessoBenchmark(
+  n: ProcessoNormalizado,
+  orgaoId: string | null,
+): Promise<{ novo: boolean; comDesfecho: boolean; movimentos: number }> {
+  const digitos = n.numeroCnj.replace(/\D/g, "");
+  if (digitos.length !== 20) return { novo: false, comDesfecho: false, movimentos: 0 };
+
+  const existente = await consultarUm<{ id: string; proprio: boolean }>(
+    `select id, proprio from processo
+     where regexp_replace(coalesce(numero_cnj, ''), '\\D', '', 'g') = $1 limit 1`,
+    [digitos],
+  );
+
+  // Um processo do escritório jamais é rebaixado a referência: se ele já
+  // existe como próprio, a coleta não o toca.
+  if (existente?.proprio) return { novo: false, comDesfecho: false, movimentos: 0 };
+
+  let processoId = existente?.id ?? null;
+
+  if (!processoId) {
+    const novo = await consultarUm<{ id: string }>(
+      `insert into processo (
+         numero_cnj, proprio, fonte, tribunal_sigla, grau, classe_cnj,
+         codigo_classe, assuntos, data_distribuicao, orgao_julgador_id,
+         sincronizado_em, status
+       ) values ($1, false, 'datajud', $2, $3, $4, $5, $6::jsonb, $7::date,
+                 $8::uuid, now(), 'coletado')
+       on conflict (numero_cnj) do update set sincronizado_em = now()
+       returning id`,
+      [
+        n.numeroCnj,
+        n.tribunalSigla ?? null,
+        n.grau ?? null,
+        n.classeCnj ?? null,
+        n.codigoClasse ?? null,
+        JSON.stringify(n.assuntos ?? []),
+        n.dataDistribuicao ?? null,
+        orgaoId,
+      ],
+    );
+    processoId = novo?.id ?? null;
+  }
+
+  if (!processoId) return { novo: false, comDesfecho: false, movimentos: 0 };
+
+  let movimentos = 0;
+  for (const m of n.movimentos) {
+    if (!m.dataHora) continue;
+    const r = await consultarUm<{ id: string }>(
+      `insert into movimento (processo_id, codigo_cnj, nome, data_hora, complementos)
+       values ($1::uuid, $2, $3, $4::timestamptz, $5::jsonb)
+       on conflict (processo_id, codigo_cnj, data_hora) do nothing
+       returning id`,
+      [processoId, m.codigo ?? null, m.nome ?? null, m.dataHora, JSON.stringify(m.complementos ?? [])],
+    );
+    if (r) movimentos++;
+  }
+
+  const desfecho = desfechoDosMovimentos(n.movimentos);
+  if (!desfecho) return { novo: !existente, comDesfecho: false, movimentos };
+
+  const jaTem = await consultarUm<{ id: string }>(
+    `select id from decisao
+     where processo_id = $1::uuid and resultado = $2::resultado_julgamento
+       and coalesce(data_decisao, '1900-01-01') = coalesce($3::date, '1900-01-01')
+     limit 1`,
+    [processoId, desfecho.resultado, desfecho.dataDecisao],
+  );
+
+  if (!jaTem) {
+    await consultar(
+      `insert into decisao (
+         origem, tipo, titulo, processo_id, numero_cnj, orgao_julgador_id,
+         instancia, data_decisao, resultado, fonte, origem_dado, observacoes
+       ) values (
+         'acervo_proprio', 'sentenca', $1, $2::uuid, $3, $4::uuid,
+         'primeiro_grau', $5::date, $6::resultado_julgamento,
+         'datajud', 'importado',
+         $7
+       )`,
+      [
+        `${desfecho.nome ?? "Julgamento"} — ${n.numeroCnj}`,
+        processoId,
+        n.numeroCnj,
+        orgaoId,
+        desfecho.dataDecisao,
+        desfecho.resultado,
+        `Desfecho derivado do movimento TPU ${desfecho.codigo} (${desfecho.nome ?? "sem nome"}). ` +
+          `Processo de terceiro, coletado para medir o comportamento do juízo.`,
+      ],
+    );
+  }
+
+  return { novo: !existente, comDesfecho: true, movimentos };
+}
+
+/** Encontra ou cria o órgão julgador pelo nome, dentro de um tribunal. */
+export async function garantirOrgao(
+  nome: string | null | undefined,
+  tribunal: string | null,
+  uf: string | null,
+): Promise<string | null> {
+  const limpo = (nome ?? "").replace(/\s+/g, " ").trim();
+  if (limpo.length < 3) return null;
+
+  const existente = await consultarUm<{ id: string }>(
+    `select id from orgao_julgador
+     where lower(unaccent(nome)) = lower(unaccent($1)) limit 1`,
+    [limpo],
+  );
+  if (existente) return existente.id;
+
+  const novo = await consultarUm<{ id: string }>(
+    `insert into orgao_julgador (nome, tribunal, uf, observacoes)
+     values ($1, $2, $3, 'Criado automaticamente na coleta do DataJud.')
+     on conflict (nome, uf) do update set nome = excluded.nome
+     returning id`,
+    [limpo, tribunal, uf],
+  );
+  return novo?.id ?? null;
 }

@@ -18,6 +18,8 @@ import {
   gravarProcesso,
   gravarPublicacao,
   registrarSincronizacao,
+  gravarProcessoBenchmark,
+  garantirOrgao,
 } from "@/lib/integracoes/gravar";
 
 export { registrarSincronizacao };
@@ -332,5 +334,148 @@ async function ingerirPdpj(c: Corpo, dryRun: boolean) {
       laudos + decisoes > 0
         ? `${laudos} laudo(s) e ${decisoes} decisão(ões) aguardam conferência em /revisao antes de entrar nas estatísticas.`
         : undefined,
+  };
+}
+
+// =====================================================================
+// Coleta de referência: "como esta vara decide"
+// =====================================================================
+
+export type ColetaOrgao = {
+  tribunal: string;
+  orgao?: string;
+  classe?: string;
+  ajuizadoDe?: string;
+  ajuizadoAte?: string;
+  julgadoDe?: string;
+  julgadoAte?: string;
+  paginas?: number;
+  dryRun?: boolean;
+};
+
+/**
+ * Coleta processos de um órgão julgador para medir seu comportamento.
+ *
+ * O recorte por data de JULGAMENTO é aplicado aqui, sobre o que voltou —
+ * a data do julgamento vive dentro do array de movimentos e o índice não
+ * permite filtrá-la direto.
+ */
+export async function coletarOrgao(p: ColetaOrgao) {
+  if (!p.tribunal) throw new Error("Informe o tribunal (ex.: trf3, tjsp).");
+  if (!p.orgao) throw new Error("Informe o nome do órgão julgador.");
+
+  const paginas = Math.min(Math.max(p.paginas ?? 1, 1), 10);
+  let cursor: unknown[] | null = null;
+  let total = 0;
+  const hits: unknown[] = [];
+
+  for (let i = 0; i < paginas; i++) {
+    const r = await datajud.buscarPorOrgao({
+      tribunal: p.tribunal,
+      orgao: p.orgao,
+      classe: p.classe,
+      ajuizadoDe: p.ajuizadoDe,
+      ajuizadoAte: p.ajuizadoAte,
+      tamanho: 100,
+      searchAfter: cursor ?? undefined,
+    });
+    total = r.total;
+    hits.push(...r.itens);
+    cursor = r.proximoCursor;
+    if (!cursor || r.itens.length === 0) break;
+  }
+
+  const normalizados = hits
+    .map(datajud.normalizar)
+    .filter((n): n is NonNullable<typeof n> => n !== null);
+
+  // Recorte por data de julgamento.
+  const noPeriodo = normalizados.filter((n) => {
+    const d = datajud.desfechoDosMovimentos(n.movimentos);
+    if (!d?.dataDecisao) return !p.julgadoDe && !p.julgadoAte;
+    if (p.julgadoDe && d.dataDecisao < p.julgadoDe) return false;
+    if (p.julgadoAte && d.dataDecisao > p.julgadoAte) return false;
+    return true;
+  });
+
+  const comDesfecho = noPeriodo.filter((n) =>
+    datajud.desfechoDosMovimentos(n.movimentos),
+  );
+
+  if (p.dryRun) {
+    // Mostra os códigos de movimento mais frequentes que ainda não estão
+    // na tabela de desfechos — é assim que a tabela cresce com segurança.
+    const contagem = new Map<number, { nome: string; n: number }>();
+    for (const n of normalizados) {
+      for (const m of n.movimentos) {
+        if (m.codigo == null) continue;
+        if (datajud.RESULTADO_POR_CODIGO[m.codigo]) continue;
+        const atual = contagem.get(m.codigo) ?? { nome: m.nome ?? "?", n: 0 };
+        atual.n++;
+        contagem.set(m.codigo, atual);
+      }
+    }
+    const naoMapeados = [...contagem.entries()]
+      .sort((a, b) => b[1].n - a[1].n)
+      .slice(0, 15)
+      .map(([codigo, v]) => `${codigo} — ${v.nome} (${v.n}x)`);
+
+    const porResultado: Record<string, number> = {};
+    for (const n of comDesfecho) {
+      const d = datajud.desfechoDosMovimentos(n.movimentos)!;
+      porResultado[d.resultado] = (porResultado[d.resultado] ?? 0) + 1;
+    }
+
+    return {
+      fonte: "datajud",
+      modo: "coleta_orgao",
+      dryRun: true,
+      totalNoTribunal: total,
+      trazidos: normalizados.length,
+      noPeriodo: noPeriodo.length,
+      comDesfechoClassificado: comDesfecho.length,
+      porResultado,
+      orgaosEncontrados: [
+        ...new Set(normalizados.map((n) => n.orgaoJulgadorNome).filter(Boolean)),
+      ].slice(0, 10),
+      movimentosNaoClassificados: naoMapeados,
+      aviso:
+        comDesfecho.length === 0
+          ? "Nenhum desfecho reconhecido. Veja `movimentosNaoClassificados`: " +
+            "se houver código de julgamento ali, me mostre que eu acrescento à tabela."
+          : `${comDesfecho.length} de ${noPeriodo.length} processos com desfecho classificado.`,
+    };
+  }
+
+  let novos = 0;
+  let comDecisao = 0;
+  let movimentos = 0;
+
+  for (const n of noPeriodo) {
+    const orgaoId = await garantirOrgao(
+      n.orgaoJulgadorNome,
+      n.tribunalSigla ?? p.tribunal.toUpperCase(),
+      null,
+    );
+    const r = await gravarProcessoBenchmark(n, orgaoId);
+    if (r.novo) novos++;
+    if (r.comDesfecho) comDecisao++;
+    movimentos += r.movimentos;
+  }
+
+  await registrarSincronizacao("datajud", `órgão: ${p.orgao}`, {
+    recebidos: noPeriodo.length,
+    novos,
+  });
+
+  return {
+    fonte: "datajud",
+    modo: "coleta_orgao",
+    totalNoTribunal: total,
+    trazidos: normalizados.length,
+    noPeriodo: noPeriodo.length,
+    processosNovos: novos,
+    comDesfecho: comDecisao,
+    movimentosNovos: movimentos,
   };
 }

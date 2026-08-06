@@ -13,6 +13,7 @@ const NAV = [
   { href: "/pecas", texto: "Peças" },
   { href: "/publicacoes", texto: "Publicações" },
   { href: "/padroes", texto: "Padrões" },
+  { href: "/juizo", texto: "Juízo" },
   { href: "/peritos", texto: "Peritos" },
   { href: "/revisao", texto: "Conferência" },
   { href: "/sincronizacao", texto: "Sincronizar" },

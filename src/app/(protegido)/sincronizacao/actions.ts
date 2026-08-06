@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { usuarioAtual } from "@/lib/auth";
-import { executarIngestao, type Corpo } from "@/lib/integracoes/executar";
+import { coletarOrgao, executarIngestao, type Corpo } from "@/lib/integracoes/executar";
 
 /**
  * Dispara a ingestão a partir da tela, com a sessão do usuário como
@@ -61,5 +61,50 @@ export async function sincronizar(_estado: unknown, form: FormData) {
     return {
       erro: erro instanceof Error ? erro.message : "Falha na sincronização.",
     };
+  }
+}
+
+
+/**
+ * Coleta processos de um órgão julgador para medir como ele decide.
+ *
+ * Separada de `sincronizar` porque a natureza é outra: não traz dado do
+ * escritório, traz população de referência. Os processos entram marcados
+ * como não-próprios e nunca se misturam ao índice de êxito do escritório.
+ */
+export async function coletar(_estado: unknown, form: FormData) {
+  const eu = await usuarioAtual();
+  if (!eu || eu.papel === "colaborador") {
+    return { erro: "Sem permissão para coletar." };
+  }
+
+  const tribunal = String(form.get("tribunal") ?? "").trim().toLowerCase();
+  const orgao = String(form.get("orgao") ?? "").trim();
+
+  if (!tribunal) return { erro: "Informe o tribunal (ex.: trf3, tjsp)." };
+  if (!orgao) return { erro: "Informe o nome do órgão julgador." };
+
+  const texto = (n: string) => {
+    const v = String(form.get(n) ?? "").trim();
+    return v || undefined;
+  };
+
+  try {
+    const resultado = await coletarOrgao({
+      tribunal,
+      orgao,
+      classe: texto("classe"),
+      ajuizadoDe: texto("ajuizado_de"),
+      ajuizadoAte: texto("ajuizado_ate"),
+      julgadoDe: texto("julgado_de"),
+      julgadoAte: texto("julgado_ate"),
+      paginas: Math.min(Math.max(Number(form.get("paginas") ?? 1), 1), 10),
+      dryRun: form.get("dry_run") === "on",
+    });
+    revalidatePath("/sincronizacao");
+    revalidatePath("/juizo");
+    return { ok: true, resultado };
+  } catch (erro) {
+    return { erro: erro instanceof Error ? erro.message : "Falha na coleta." };
   }
 }
