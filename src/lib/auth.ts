@@ -255,10 +255,18 @@ export async function registrarAcesso(
   ).catch(() => {});
 }
 
-/** Existe ao menos um usuário? Define se o sistema mostra o primeiro cadastro. */
+/**
+ * Existe ao menos um usuário? Define se o sistema mostra o primeiro
+ * cadastro.
+ *
+ * Deliberadamente NÃO engole erro de banco. A versão anterior devolvia
+ * `false` quando a consulta falhava, e o efeito foi ruim: com o banco
+ * inacessível, a tela anunciava "Primeiro acesso — nenhum usuário
+ * cadastrado", afirmando algo que não tinha como saber. Quem visse aquilo
+ * concluiria que a base estava vazia, quando na verdade estava
+ * inalcançável.
+ */
 export async function existeAlgumUsuario(): Promise<boolean> {
-  const r = await consultarUm<{ n: string }>("select count(*)::int as n from usuario").catch(
-    () => null,
-  );
+  const r = await consultarUm<{ n: string }>("select count(*)::int as n from usuario");
   return r ? Number(r.n) > 0 : false;
 }
