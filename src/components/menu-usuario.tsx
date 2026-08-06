@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { sair } from "@/app/login/actions";
 
 const PAPEL: Record<string, string> = {
@@ -17,7 +18,9 @@ export function MenuUsuario({ nome, papel }: { nome: string; papel: string }) {
   return (
     <div className="flex items-center gap-2 border-l pl-2">
       <div className="hidden text-right leading-tight sm:block">
-        <div className="text-sm font-medium">{primeiro}</div>
+        <Link href="/conta" className="text-sm font-medium hover:underline">
+          {primeiro}
+        </Link>
         <div className="text-xs" style={{ color: "var(--tinta-3)" }}>
           {PAPEL[papel] ?? papel}
         </div>

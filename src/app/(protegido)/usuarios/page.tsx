@@ -4,6 +4,7 @@ import { consultar } from "@/lib/db";
 import { dataBR } from "@/lib/labels";
 import { Cartao, TituloPagina, Vazio } from "@/components/ui";
 import { FormularioUsuario } from "./formulario";
+import { Desbloquear, RedefinirSenha } from "./acoes-senha";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,7 @@ export default async function Usuarios() {
                     <th>Papel</th>
                     <th>Último acesso</th>
                     <th className="num">Sessões</th>
+                    <th>Senha</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -69,7 +71,9 @@ export default async function Usuarios() {
                           <span className="selo selo-reves ml-2">inativo</span>
                         )}
                         {Boolean(u.bloqueado_ate) && (
-                          <span className="selo selo-reves ml-2">bloqueado</span>
+                          <span className="ml-2 inline-block">
+                            <Desbloquear usuarioId={String(u.id)} />
+                          </span>
                         )}
                         {u.id === eu.id && (
                           <span className="selo selo-neutro ml-2">você</span>
@@ -81,6 +85,12 @@ export default async function Usuarios() {
                         {u.ultimo_acesso ? dataBR(u.ultimo_acesso as string) : "nunca"}
                       </td>
                       <td className="num tabular-nums">{Number(u.sessoes_ativas)}</td>
+                      <td>
+                        <RedefinirSenha
+                          usuarioId={String(u.id)}
+                          nome={String(u.nome)}
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -130,6 +130,27 @@ porque a base guarda dado de saúde.
 
 Papéis: `administrador` (gerencia usuários), `advogado` e `colaborador`.
 
+### Trocar e recuperar senha
+
+- **Trocar a própria** — clique no seu nome no cabeçalho → *Minha conta*. A
+  senha atual é exigida mesmo com a sessão aberta, e a troca encerra as demais
+  sessões.
+- **Esqueceu** — não há envio de e-mail. Peça a um administrador que redefina a
+  sua em *Usuários*.
+- **Conta bloqueada** por cinco erros seguidos: some sozinha em 15 minutos, ou
+  um administrador libera na hora em *Usuários*.
+- **Único administrador, sem acesso** — resta apagar o usuário no banco e
+  refazer o primeiro acesso:
+
+```sql
+delete from sessao;
+delete from usuario;
+```
+
+Feito isso, `/login` volta a oferecer o primeiro acesso. Faça imediatamente:
+enquanto não houver usuário, quem chegar primeiro àquela tela vira o
+administrador.
+
 ---
 
 ## Publicando para acesso remoto

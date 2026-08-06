@@ -1,11 +1,15 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { criarPrimeiroUsuario, entrar } from "./actions";
 
 export function FormularioLogin({ destino }: { destino?: string }) {
   const [estado, acao] = useActionState(entrar, null);
+  // O React 19 reseta o formulário depois da ação. Num campo não
+  // controlado isso apaga o e-mail a cada senha errada, obrigando a
+  // redigitá-lo — irritante justamente quando a pessoa já está errando.
+  const [email, setEmail] = useState("");
 
   return (
     <form action={acao} className="cartao space-y-4 px-5 py-5">
@@ -33,6 +37,8 @@ export function FormularioLogin({ destino }: { destino?: string }) {
           required
           autoFocus
           className="campo"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
         />
       </div>
 
@@ -40,6 +46,8 @@ export function FormularioLogin({ destino }: { destino?: string }) {
         <label className="rotulo-campo" htmlFor="senha">
           Senha
         </label>
+        {/* A senha continua não controlada de propósito: limpar depois de
+            uma tentativa falha é o comportamento desejado. */}
         <input
           id="senha"
           name="senha"
