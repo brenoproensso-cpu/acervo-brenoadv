@@ -16,3 +16,9 @@ yarn-error.log*
 
 # Arquivos do acervo (PDF/DOCX) ficam fora do versionamento
 storage/
+
+# Skills de agente instaladas por `npx skills add` — ferramenta local,
+# não faz parte da aplicação. O lockfile fica versionado para que a
+# instalação seja reproduzível.
+.agents/
+.claude/
