@@ -12,9 +12,9 @@
 --
 -- Roda numa transação: ou aplica tudo, ou não aplica nada.
 --
--- É seguro rodar de novo. Cada migration usa "create table if not
--- exists" e "create or replace", então reaplicar não duplica nem apaga
--- nada — apenas reafirma o estado atual.
+-- É seguro rodar de novo. As tabelas usam "create table if not exists",
+-- então reaplicar não duplica nem apaga dado nenhum — apenas acrescenta
+-- o que falta e reafirma o resto.
 --
 -- Contém 11 migrations. NÃO inclui dados de demonstração.
 -- =====================================================================
@@ -25,6 +25,36 @@ create table if not exists schema_migrations (
   versao      text primary key,
   aplicada_em timestamptz not null default now()
 );
+
+-- ---------------------------------------------------------------------
+-- Apaga as views antes de recriá-las.
+--
+-- Não se perde nada: view é consulta salva, não guarda linha alguma.
+--
+-- Sem isto, reaplicar o instalador num banco já instalado quebra com
+-- "cannot drop columns from view" (42P16). O motivo: o Postgres só
+-- aceita "create or replace view" se a lista de colunas for igual ou
+-- maior. Quando uma migration posterior acrescenta uma coluna a uma view
+-- criada antes — foi o caso da coluna "confirmado" em vw_laudo_decisao,
+-- na 0008 — a migration antiga, ao rodar de novo, tenta recriá-la com a
+-- lista curta e o banco recusa.
+--
+-- Recriar do zero também garante que as views reflitam exatamente as
+-- migrations do repositório, sem sobra de alguma versão anterior.
+-- ---------------------------------------------------------------------
+do $apagar_views$
+declare
+  v record;
+begin
+  for v in
+    select table_name
+    from information_schema.views
+    where table_schema = 'public'
+  loop
+    execute format('drop view if exists public.%I cascade', v.table_name);
+  end loop;
+end
+$apagar_views$;
 
 
 -- =====================================================================

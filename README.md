@@ -189,7 +189,8 @@ telas afetadas quebram.
 O sistema avisa: aparece uma tarja vermelha no topo de todas as telas dizendo
 quais migrations faltam. Quando ela aparecer, cole `db/instalar.sql` de novo no
 SQL Editor do Supabase. Reaplicar é seguro — o arquivo só acrescenta o que
-falta.
+falta: as tabelas e os dados ficam intactos, e as views são recriadas do zero
+(view não guarda linha nenhuma, é consulta salva).
 
 ### 4. Primeiro acesso
 
