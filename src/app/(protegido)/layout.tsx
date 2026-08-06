@@ -15,6 +15,7 @@ const NAV = [
   { href: "/padroes", texto: "Padrões" },
   { href: "/peritos", texto: "Peritos" },
   { href: "/revisao", texto: "Conferência" },
+  { href: "/sincronizacao", texto: "Sincronizar" },
 ];
 
 export default async function LayoutProtegido({
