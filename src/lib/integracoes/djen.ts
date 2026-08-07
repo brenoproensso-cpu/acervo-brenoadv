@@ -47,6 +47,106 @@ export { pareceDecisao };
 
 const BASE = process.env.DJEN_API_URL ?? "https://comunicaapi.pje.jus.br/api/v1";
 
+// ---------------------------------------------------------------------
+// Cabeçalhos
+// ---------------------------------------------------------------------
+// O DJEN é consultado pelo navegador em comunica.pje.jus.br. Um cliente
+// que não se parece com navegador — sem User-Agent, sem Accept-Language,
+// sem Referer — costuma levar 403 antes mesmo de a consulta ser lida,
+// porque quem responde é a proteção da borda, não a API.
+//
+// Nada aqui contorna autenticação: a consulta é pública. É só apresentar
+// o cliente de forma reconhecível. DJEN_USER_AGENT permite trocar sem
+// mexer no código.
+const UA_PADRAO =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/126.0.0.0 Safari/537.36";
+
+function cabecalhos(): Record<string, string> {
+  const token = process.env.DJEN_API_TOKEN;
+  return {
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "User-Agent": process.env.DJEN_USER_AGENT ?? UA_PADRAO,
+    Referer: "https://comunica.pje.jus.br/",
+    Origin: "https://comunica.pje.jus.br",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+/** Resposta crua de uma chamada, com o suficiente para diagnosticar. */
+export type RespostaDjen = {
+  ok: boolean;
+  status: number;
+  /** URL chamada, para conferir o que de fato foi pedido. */
+  url: string;
+  /** Itens já desembrulhados, quando a resposta veio bem. */
+  itens: unknown[];
+  /** Total que o servidor diz existir, quando informa. */
+  total: number | null;
+  /** Início do corpo quando a resposta não foi OK — é o que explica o erro. */
+  trecho?: string;
+  /** Identifica quem respondeu: API ou proteção de borda. */
+  servidor?: string;
+};
+
+/**
+ * Uma chamada ao endpoint de consulta. Não lança: devolve o que houve.
+ *
+ * Erro de rede vira status 0 — assim o chamador trata tudo num lugar só,
+ * e a mensagem que chega à tela diz o que aconteceu de verdade.
+ */
+async function pedir(params: URLSearchParams): Promise<RespostaDjen> {
+  const url = `${BASE}/comunicacao?${params}`;
+
+  let resposta: Response;
+  try {
+    resposta = await fetch(url, { headers: cabecalhos(), cache: "no-store" });
+  } catch (erro) {
+    return {
+      ok: false,
+      status: 0,
+      url,
+      itens: [],
+      total: null,
+      trecho: erro instanceof Error ? erro.message : "falha de rede",
+    };
+  }
+
+  const servidor = resposta.headers.get("server") ?? undefined;
+
+  if (!resposta.ok) {
+    const corpo = await resposta.text().catch(() => "");
+    return {
+      ok: false,
+      status: resposta.status,
+      url,
+      itens: [],
+      total: null,
+      trecho: corpo.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300),
+      servidor,
+    };
+  }
+
+  const json = (await resposta.json().catch(() => null)) as unknown;
+  const itens = Array.isArray(json)
+    ? json
+    : lista(json, "items", "content", "data", "comunicacoes", "resultado");
+  const total =
+    json && typeof json === "object" && !Array.isArray(json)
+      ? Number((json as Record<string, unknown>).count ?? (json as Record<string, unknown>).total)
+      : null;
+
+  return {
+    ok: true,
+    status: resposta.status,
+    url,
+    itens,
+    total: Number.isFinite(total) ? (total as number) : null,
+    servidor,
+  };
+}
+
 export type ConsultaDjen = {
   numeroOab: string;
   ufOab: string;
@@ -73,28 +173,43 @@ export async function buscarComunicacoes(c: ConsultaDjen): Promise<unknown[]> {
   });
   if (c.numeroCnj) params.set("numeroProcesso", c.numeroCnj.replace(/\D/g, ""));
 
-  const token = process.env.DJEN_API_TOKEN;
+  const r = await pedir(params);
+  if (!r.ok) throw new Error(explicar(r, "Confira OAB/UF e o intervalo de datas."));
+  return r.itens;
+}
 
-  const resposta = await fetch(`${BASE}/comunicacao?${params}`, {
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  if (!resposta.ok) {
-    throw new Error(
-      `DJEN respondeu ${resposta.status} ${resposta.statusText}. ` +
-        `Confira OAB/UF e o intervalo de datas.`,
-    );
+/**
+ * Transforma uma resposta ruim em texto que serve para agir.
+ *
+ * A versão anterior dizia "confira tribunal e datas" para qualquer 403 —
+ * um palpite, e errado: 403 raramente tem a ver com o que foi consultado.
+ * Aqui vai o status, quem respondeu e o que o corpo dizia.
+ */
+function explicar(r: RespostaDjen, dica?: string): string {
+  if (r.status === 0) {
+    return `Não foi possível falar com o DJEN: ${r.trecho ?? "falha de rede"}.`;
   }
 
-  const json = (await resposta.json()) as unknown;
+  const partes = [`DJEN respondeu ${r.status}.`];
 
-  // A API às vezes devolve o array direto, às vezes embrulhado.
-  if (Array.isArray(json)) return json;
-  const items = lista(json, "items", "content", "data", "comunicacoes", "resultado");
-  return items;
+  if (r.status === 403) {
+    partes.push(
+      "Um 403 aqui costuma vir da proteção de borda do CNJ, não da consulta: " +
+        "a requisição foi barrada antes de ser lida. Bloqueio por origem da " +
+        "chamada é a causa mais comum quando o servidor fica fora do Brasil.",
+    );
+  } else if (r.status === 429) {
+    partes.push("Consultas demais em pouco tempo. Espere alguns minutos.");
+  } else if (r.status >= 500) {
+    partes.push("A falha é do lado do CNJ. Tente de novo mais tarde.");
+  } else if (dica) {
+    partes.push(dica);
+  }
+
+  if (r.servidor) partes.push(`Respondeu: ${r.servidor}.`);
+  if (r.trecho) partes.push(`Corpo: ${r.trecho}`);
+
+  return partes.join(" ");
 }
 
 /** Envelopa o item cru para gravação em staging. */
@@ -206,66 +321,213 @@ export type ConsultaOrgaoDjen = {
   itensPorPagina?: number;
 };
 
-export async function buscarPorOrgao(c: ConsultaOrgaoDjen): Promise<{
-  itens: unknown[];
-  paginasLidas: number;
-  totalBruto: number;
-}> {
-  const token = process.env.DJEN_API_TOKEN;
-  const paginas = Math.min(Math.max(c.paginas ?? 3, 1), 30);
-  const porPagina = Math.min(c.itensPorPagina ?? 100, 100);
-
-  const coletado: unknown[] = [];
-  let totalBruto = 0;
-  let lidas = 0;
-
-  for (let pagina = 1; pagina <= paginas; pagina++) {
-    const params = new URLSearchParams({
+/**
+ * Os jeitos de pedir a mesma coisa, do mais específico ao mais simples.
+ *
+ * Não há como saber daqui qual nome de parâmetro a API usa para o órgão,
+ * nem se ela aceita uma varredura por tribunal. Em vez de apostar num
+ * palpite e falhar inteiro, tenta-se em ordem e usa-se o primeiro que
+ * responder. O recorte fino acontece depois, em `filtrar()`, sobre o que
+ * voltou — então uma variante mais simples continua dando o mesmo
+ * resultado final, só gastando mais tráfego.
+ */
+function variantes(c: ConsultaOrgaoDjen, pagina: number, porPagina: number) {
+  const base = () => {
+    const p = new URLSearchParams({
       dataDisponibilizacaoInicio: c.dataInicio,
       dataDisponibilizacaoFim: c.dataFim,
       pagina: String(pagina),
       itensPorPagina: String(porPagina),
     });
+    return p;
+  };
 
-    // Filtros que o servidor pode ou não conhecer. Se ignorar, o recorte
-    // acontece adiante, sobre o que voltou.
-    if (c.tribunal) params.set("siglaTribunal", c.tribunal.toUpperCase());
-    if (c.orgao) {
-      params.set("nomeOrgao", c.orgao);
-      params.set("orgao", c.orgao);
+  const comTribunal = () => {
+    const p = base();
+    if (c.tribunal) p.set("siglaTribunal", c.tribunal.toUpperCase());
+    return p;
+  };
+
+  const lista_: { nome: string; params: URLSearchParams }[] = [];
+
+  if (c.orgao) {
+    if (c.contendo) {
+      const p = comTribunal();
+      p.set("nomeOrgao", c.orgao);
+      p.set("texto", c.contendo);
+      lista_.push({ nome: "tribunal + nomeOrgao + texto", params: p });
     }
-    if (c.contendo) params.set("texto", c.contendo);
+    const p2 = comTribunal();
+    p2.set("nomeOrgao", c.orgao);
+    lista_.push({ nome: "tribunal + nomeOrgao", params: p2 });
 
-    const resposta = await fetch(`${BASE}/comunicacao?${params}`, {
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
-    if (!resposta.ok) {
-      if (pagina === 1) {
-        throw new Error(
-          `DJEN respondeu ${resposta.status} ${resposta.statusText}. ` +
-            `Confira tribunal e intervalo de datas.`,
-        );
-      }
-      break;
-    }
-
-    const json = (await resposta.json()) as unknown;
-    const itens = Array.isArray(json)
-      ? json
-      : lista(json, "items", "content", "data", "comunicacoes", "resultado");
-
-    lidas++;
-    totalBruto += itens.length;
-    coletado.push(...itens);
-
-    if (itens.length < porPagina) break;
+    const p3 = comTribunal();
+    p3.set("orgaoJulgador", c.orgao);
+    lista_.push({ nome: "tribunal + orgaoJulgador", params: p3 });
   }
 
-  return { itens: coletado, paginasLidas: lidas, totalBruto };
+  if (c.contendo && !c.orgao) {
+    const p = comTribunal();
+    p.set("texto", c.contendo);
+    lista_.push({ nome: "tribunal + texto", params: p });
+  }
+
+  if (c.tribunal) lista_.push({ nome: "só tribunal + datas", params: comTribunal() });
+  lista_.push({ nome: "só datas", params: base() });
+
+  return lista_;
+}
+
+export type BuscaPorOrgao = {
+  itens: unknown[];
+  paginasLidas: number;
+  totalBruto: number;
+  /** Variante que a API aceitou — mostra qual filtro ela de fato entende. */
+  varianteUsada: string;
+  /** O que cada tentativa respondeu, para diagnóstico. */
+  tentativas: { variante: string; status: number; itens: number }[];
+};
+
+export async function buscarPorOrgao(c: ConsultaOrgaoDjen): Promise<BuscaPorOrgao> {
+  const paginas = Math.min(Math.max(c.paginas ?? 3, 1), 30);
+  const porPagina = Math.min(c.itensPorPagina ?? 100, 100);
+
+  // Página 1 descobre qual variante funciona; as demais repetem essa.
+  const tentativas: { variante: string; status: number; itens: number }[] = [];
+  let escolhida: { nome: string; resposta: RespostaDjen } | null = null;
+  let ultima: RespostaDjen | null = null;
+
+  for (const v of variantes(c, 1, porPagina)) {
+    const r = await pedir(v.params);
+    tentativas.push({ variante: v.nome, status: r.status, itens: r.itens.length });
+    ultima = r;
+    if (r.ok) {
+      escolhida = { nome: v.nome, resposta: r };
+      break;
+    }
+    // 403/401 é barreira: as outras variantes vão bater na mesma porta.
+    // Só vale insistir quando a recusa foi da consulta, não do acesso.
+    if (r.status === 403 || r.status === 401 || r.status === 0) break;
+  }
+
+  if (!escolhida) {
+    throw new Error(explicar(ultima!, "Nenhuma forma de consulta foi aceita."));
+  }
+
+  const coletado: unknown[] = [...escolhida.resposta.itens];
+  let lidas = 1;
+  let totalBruto = escolhida.resposta.itens.length;
+
+  if (escolhida.resposta.itens.length >= porPagina) {
+    for (let pagina = 2; pagina <= paginas; pagina++) {
+      const v = variantes(c, pagina, porPagina).find((x) => x.nome === escolhida!.nome);
+      if (!v) break;
+      const r = await pedir(v.params);
+      if (!r.ok) break;
+      lidas++;
+      totalBruto += r.itens.length;
+      coletado.push(...r.itens);
+      if (r.itens.length < porPagina) break;
+    }
+  }
+
+  return {
+    itens: coletado,
+    paginasLidas: lidas,
+    totalBruto,
+    varianteUsada: escolhida.nome,
+    tentativas,
+  };
+}
+
+/**
+ * Bate na API com uma consulta mínima e conta o que aconteceu.
+ *
+ * Existe porque 403 não diz nada sozinho. Uma execução daqui, feita do
+ * servidor que roda o sistema, separa as três causas possíveis: consulta
+ * malformada, endereço errado, ou acesso barrado na borda.
+ */
+export async function diagnosticarConexao(): Promise<{
+  base: string;
+  identificacao: string;
+  testes: {
+    nome: string;
+    url: string;
+    status: number;
+    itens: number;
+    servidor?: string;
+    corpo?: string;
+  }[];
+  leitura: string;
+}> {
+  const hoje = new Date();
+  const ate = hoje.toISOString().slice(0, 10);
+  const de = new Date(hoje.getTime() - 3 * 86_400_000).toISOString().slice(0, 10);
+
+  const casos: { nome: string; params: URLSearchParams }[] = [
+    {
+      nome: "3 dias, sem filtro nenhum",
+      params: new URLSearchParams({
+        dataDisponibilizacaoInicio: de,
+        dataDisponibilizacaoFim: ate,
+        pagina: "1",
+        itensPorPagina: "1",
+      }),
+    },
+    {
+      nome: "3 dias, só siglaTribunal=TRF3",
+      params: new URLSearchParams({
+        dataDisponibilizacaoInicio: de,
+        dataDisponibilizacaoFim: ate,
+        siglaTribunal: "TRF3",
+        pagina: "1",
+        itensPorPagina: "1",
+      }),
+    },
+    {
+      nome: "sem data nenhuma",
+      params: new URLSearchParams({ pagina: "1", itensPorPagina: "1" }),
+    },
+  ];
+
+  const testes = [];
+  for (const caso of casos) {
+    const r = await pedir(caso.params);
+    testes.push({
+      nome: caso.nome,
+      url: r.url,
+      status: r.status,
+      itens: r.itens.length,
+      servidor: r.servidor,
+      corpo: r.trecho,
+    });
+  }
+
+  const algumOk = testes.some((t) => t.status === 200);
+  const todos403 = testes.every((t) => t.status === 403);
+  const rede = testes.every((t) => t.status === 0);
+
+  const leitura = rede
+    ? "Nenhuma chamada saiu: o servidor não alcança comunicaapi.pje.jus.br."
+    : algumOk
+      ? "A API responde. O 403 anterior veio da combinação de filtros, não do acesso — " +
+        "veja acima qual consulta passou e use esse recorte."
+      : todos403
+        ? "Todas as chamadas levaram 403, inclusive a mais simples possível. " +
+          "Não é a consulta: o acesso está sendo barrado antes. A causa mais " +
+          "provável é a origem da chamada — o CNJ restringe consulta vinda de " +
+          "servidor fora do Brasil, e a Vercel roda nos Estados Unidos por " +
+          "padrão. Em Vercel → Settings → Functions, mude a região para " +
+          "São Paulo (gru1) e publique de novo."
+        : "A API recusou as chamadas, mas não com 403. Veja o corpo de cada " +
+          "resposta acima: ele costuma dizer o que faltou.";
+
+  return {
+    base: BASE,
+    identificacao: process.env.DJEN_USER_AGENT ?? UA_PADRAO,
+    testes,
+    leitura,
+  };
 }
 
 /**

@@ -551,6 +551,11 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
       fonte: "djen",
       modo: "coleta_orgao",
       dryRun: true,
+      // Qual recorte a API entendeu, e o que respondeu a cada tentativa.
+      // Numa fonte cujo contrato não dá para conferir de antemão, é isto
+      // que transforma uma execução em conhecimento.
+      consultaAceita: bruto.varianteUsada,
+      tentativas: bruto.tentativas,
       paginasLidas: bruto.paginasLidas,
       publicacoesNoPeriodo: bruto.totalBruto,
       aposFiltro: filtrados.length,
@@ -577,6 +582,7 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
 
   let novas = 0;
   let decisoes = 0;
+  const descartadas: Record<string, number> = {};
 
   for (const p of candidatas) {
     await gravarBruto({
@@ -589,6 +595,7 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
     const r = await gravarSentencaColetada(p, c.orgao ?? p.orgao ?? null, c.tribunal ?? null);
     if (r.novo) novas++;
     if (r.decisaoCriada) decisoes++;
+    if (r.motivo) descartadas[r.motivo] = (descartadas[r.motivo] ?? 0) + 1;
   }
 
   await registrarSincronizacao("djen", `órgão: ${c.orgao ?? c.magistrado ?? c.contendo}`, {
@@ -599,12 +606,19 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
   return {
     fonte: "djen",
     modo: "coleta_orgao",
+    consultaAceita: bruto.varianteUsada,
     paginasLidas: bruto.paginasLidas,
     publicacoesLidas: bruto.totalBruto,
     aposFiltro: filtrados.length,
     comAparenciaDeDecisao: candidatas.length,
     processosNovos: novas,
     decisoesGravadas: decisoes,
-    aviso: `${decisoes} sentenças gravadas com inteiro teor. Veja em Decisões, filtro "Coleta do juízo".`,
+    descartadas,
+    aviso:
+      decisoes > 0
+        ? `${decisoes} sentenças gravadas com inteiro teor. Veja em Decisões, ` +
+          `filtro "Coleta do juízo".`
+        : `Nenhuma sentença foi gravada, embora ${candidatas.length} tenham sido ` +
+          `encontradas. Veja "descartadas" abaixo: ali está o motivo de cada uma.`,
   };
 }

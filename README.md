@@ -178,6 +178,7 @@ O projeto é Next.js padrão, sem configuração especial. Defina as variáveis:
 | `DATABASE_URL` | conexão com o banco (pooler) |
 | `INGESTAO_TOKEN` | protege `POST /api/ingerir` |
 | `DATAJUD_API_KEY` | chave pública do CNJ |
+| `DJEN_USER_AGENT` | opcional: como o cliente se identifica ao DJEN |
 | `NODE_ENV=production` | faz o cookie de sessão exigir HTTPS |
 
 ### 3. Depois de cada publicação, confira as migrations
@@ -290,6 +291,28 @@ nenhuma. O retorno diz qual dos dois aconteceu.
 
 A aplicação precisa estar no ar. Para sincronizar por cron, chame direto o
 endpoint `POST /api/ingerir` (proteja com `INGESTAO_TOKEN`).
+
+### Quando o DJEN responde 403
+
+Um 403 aqui quase nunca tem a ver com o que foi consultado — a requisição é
+barrada antes de a consulta ser lida. Na tela de **Juízo**, o botão
+**"Descobrir o que está barrando"** faz três chamadas de teste a partir do
+servidor e diz qual das causas é:
+
+- **Todas as chamadas levam 403, inclusive a mais simples.** O acesso está
+  sendo recusado pela origem da chamada. O CNJ restringe consulta vinda de
+  servidor fora do Brasil, e a Vercel roda nos Estados Unidos por padrão: em
+  **Vercel → Settings → Functions**, mude a região para São Paulo (`gru1`) e
+  publique de novo.
+- **Alguma chamada responde 200.** Então o acesso existe e o problema era a
+  combinação de filtros. O resultado da busca mostra, em `consultaAceita`,
+  qual recorte a API entendeu.
+- **Nenhuma chamada sai.** O servidor não alcança `comunicaapi.pje.jus.br`.
+
+A busca não depende de acertar o nome do parâmetro de primeira: ela tenta do
+recorte mais específico ao mais simples e usa o primeiro que a API aceitar,
+aplicando o resto do filtro sobre o que voltou. `DJEN_USER_AGENT` permite
+trocar como o cliente se identifica, sem mexer no código.
 
 ### Sobre os contratos das APIs
 

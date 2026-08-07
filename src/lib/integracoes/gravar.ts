@@ -631,13 +631,28 @@ export async function garantirOrgao(
  * perito medida sobre vinte casos. A tela de Juízo informa quantas vieram
  * de leitura de texto e quantas de código estruturado.
  */
+/**
+ * O motivo existe porque "0 gravadas" não é resposta.
+ *
+ * Uma coleta que encontra 40 sentenças e grava nenhuma pode ser diário
+ * sem número de processo, teor que não deixa ler o dispositivo, ou
+ * material já registrado — cada caso pede uma providência diferente.
+ */
+export type ResultadoGravacaoSentenca = {
+  novo: boolean;
+  decisaoCriada: boolean;
+  motivo?: string;
+};
+
 export async function gravarSentencaColetada(
   p: PublicacaoNormalizada,
   orgaoNome: string | null,
   tribunal: string | null,
-): Promise<{ novo: boolean; decisaoCriada: boolean }> {
+): Promise<ResultadoGravacaoSentenca> {
   const e = extrairDaDecisao(p.teor);
-  if (!e.resultado) return { novo: false, decisaoCriada: false };
+  if (!e.resultado) {
+    return { novo: false, decisaoCriada: false, motivo: "sem desfecho legível no dispositivo" };
+  }
 
   const orgaoId = await garantirOrgao(
     orgaoNome ?? p.orgao ?? null,
@@ -647,10 +662,18 @@ export async function gravarSentencaColetada(
 
   // Sem número de processo não há como deduplicar; o teor sozinho não
   // identifica o caso.
-  if (!p.numeroCnj) return { novo: false, decisaoCriada: false };
+  if (!p.numeroCnj) {
+    return { novo: false, decisaoCriada: false, motivo: "publicação sem número de processo" };
+  }
 
   const digitos = p.numeroCnj.replace(/\D/g, "");
-  if (digitos.length !== 20) return { novo: false, decisaoCriada: false };
+  if (digitos.length !== 20) {
+    return {
+      novo: false,
+      decisaoCriada: false,
+      motivo: `número fora do padrão CNJ (${digitos.length} dígitos)`,
+    };
+  }
 
   const existente = await consultarUm<{ id: string; proprio: boolean }>(
     `select id, proprio from processo
@@ -659,7 +682,9 @@ export async function gravarSentencaColetada(
   );
 
   // Processo do escritório não vira população de referência.
-  if (existente?.proprio) return { novo: false, decisaoCriada: false };
+  if (existente?.proprio) {
+    return { novo: false, decisaoCriada: false, motivo: "processo é do próprio escritório" };
+  }
 
   let processoId = existente?.id ?? null;
   if (!processoId) {
@@ -672,7 +697,9 @@ export async function gravarSentencaColetada(
     );
     processoId = novo?.id ?? null;
   }
-  if (!processoId) return { novo: false, decisaoCriada: false };
+  if (!processoId) {
+    return { novo: false, decisaoCriada: false, motivo: "não foi possível registrar o processo" };
+  }
 
   const dataDecisao = e.dataDecisao ?? p.dataDisponibilizacao ?? null;
 
@@ -683,7 +710,7 @@ export async function gravarSentencaColetada(
      limit 1`,
     [processoId, e.resultado, dataDecisao],
   );
-  if (jaTem) return { novo: !existente, decisaoCriada: false };
+  if (jaTem) return { novo: !existente, decisaoCriada: false, motivo: "decisão já registrada" };
 
   await consultar(
     `insert into decisao (

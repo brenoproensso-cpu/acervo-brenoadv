@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { usuarioAtual } from "@/lib/auth";
+import { diagnosticarConexao } from "@/lib/integracoes/djen";
 import {
   coletarDjenPorOrgao,
   coletarOrgao,
@@ -159,5 +160,24 @@ export async function coletarSentencas(_estado: unknown, form: FormData) {
     return { ok: true, resultado };
   } catch (erro) {
     return { erro: erro instanceof Error ? erro.message : "Falha na coleta." };
+  }
+}
+
+/**
+ * Testa a conexão com o DJEN e diz o que está barrando.
+ *
+ * Roda no servidor que hospeda o sistema — é o único lugar de onde dá
+ * para saber se o CNJ aceita a chamada, já que a resposta depende de
+ * onde ela nasce.
+ */
+export async function diagnosticarDjen() {
+  const eu = await usuarioAtual();
+  if (!eu || eu.papel === "colaborador") {
+    return { erro: "Sem permissão." };
+  }
+  try {
+    return { ok: true, resultado: await diagnosticarConexao() };
+  } catch (erro) {
+    return { erro: erro instanceof Error ? erro.message : "Falha no diagnóstico." };
   }
 }
