@@ -278,7 +278,11 @@ export const decisao = (id: string) =>
             b.codigo as beneficio_codigo, b.nome as beneficio_nome,
             o.nome   as orgao_nome, o.tribunal as orgao_tribunal,
             m.nome   as magistrado_nome,
-            p.numero_cnj as processo_numero, p.cliente_nome, p.id as proc_id
+            p.numero_cnj as processo_numero, p.cliente_nome, p.id as proc_id,
+            -- Distingue o acervo do escritório da população coletada para
+            -- medir o juízo. Sem isto a tela chama de "acervo próprio" uma
+            -- sentença de terceiro.
+            p.proprio
      from decisao d
      left join beneficio b      on b.id = d.beneficio_id
      left join orgao_julgador o on o.id = d.orgao_julgador_id

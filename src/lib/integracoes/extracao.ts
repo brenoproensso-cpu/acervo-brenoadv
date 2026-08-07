@@ -434,6 +434,159 @@ export function extrairDaDecisao(
   };
 }
 
+// =====================================================================
+// Divisão da sentença em relatório, fundamentação e dispositivo
+// =====================================================================
+// Ler uma sentença inteira num bloco só serve para conferir; para
+// estudar como o juízo pensa, o que interessa é a fundamentação — e ela
+// precisa estar separada do relatório (que só repete o pedido) e do
+// dispositivo (que só anuncia o resultado).
+//
+// A divisão é feita na leitura, não na gravação: o texto publicado
+// continua sendo a verdade guardada, e melhorar o reconhecimento não
+// exige reprocessar nada.
+// =====================================================================
+
+export type PartesSentenca = {
+  /** Autuação, partes, número — o que vem antes do relatório. */
+  cabecalho: string | null;
+  relatorio: string | null;
+  fundamentacao: string | null;
+  dispositivo: string | null;
+  /** Falso quando o texto não deixou reconhecer as divisões. */
+  dividida: boolean;
+};
+
+/** Onde o relatório termina e o juízo começa a decidir. */
+const FIM_DO_RELATORIO = [
+  /é\s+o\s+(breve\s+|sucinto\s+|relat[óo]rio\b)/i,
+  /dispensad[oa]\s+o\s+relat[óo]rio/i,
+  /relat[óo]rio\s+dispensado/i,
+  /\bfundamenta[çc][ãa]o\b/i,
+  /\bfundamento\s+e\s+decido\b/i,
+  /\bpasso\s+a\s+decidir\b/i,
+  /\bdecido\b/i,
+  /\bm[ée]rito\b/i,
+];
+
+/** Onde começa o dispositivo. */
+const INICIO_DO_DISPOSITIVO = [
+  /\bante\s+o\s+exposto\b/i,
+  /\bdiante\s+do\s+exposto\b/i,
+  /\bisso\s+posto\b/i,
+  /\bisto\s+posto\b/i,
+  /\bpelo\s+exposto\b/i,
+  /\bdo\s+exposto\b/i,
+  /\bem\s+face\s+do\s+exposto\b/i,
+  /\bpor\s+todo\s+o\s+exposto\b/i,
+  /^\s*(?:i{1,3}\s*[-–.)]\s*)?dispositivo\s*$/im,
+];
+
+/** Onde o relatório começa, quando há cabeçalho antes dele. */
+const INICIO_DO_RELATORIO = [
+  /^\s*(?:i\s*[-–.)]\s*)?relat[óo]rio\s*$/im,
+  /\btrata-se\s+de\b/i,
+  /\bcuida-se\s+de\b/i,
+  /\bvistos[,.\s]/i,
+];
+
+/**
+ * Última ocorrência de um dos padrões — e não a primeira.
+ *
+ * "Ante o exposto" aparece citado no meio da fundamentação com alguma
+ * frequência (transcrição de acórdão, por exemplo). O dispositivo de
+ * verdade é o último.
+ */
+function ultimaOcorrencia(texto: string, padroes: RegExp[]): number {
+  let melhor = -1;
+  for (const p of padroes) {
+    const re = new RegExp(p.source, p.flags.includes("g") ? p.flags : `${p.flags}g`);
+    for (const m of texto.matchAll(re)) {
+      if (m.index !== undefined && m.index > melhor) melhor = m.index;
+    }
+  }
+  return melhor;
+}
+
+function primeiraOcorrencia(texto: string, padroes: RegExp[], ate: number): number {
+  let melhor = -1;
+  const janela = ate > 0 ? texto.slice(0, ate) : texto;
+  for (const p of padroes) {
+    const m = janela.match(p);
+    if (m?.index !== undefined && (melhor === -1 || m.index < melhor)) melhor = m.index;
+  }
+  return melhor;
+}
+
+const limpar = (s: string): string | null => {
+  const t = s.trim();
+  return t.length > 0 ? t : null;
+};
+
+export function dividirSentenca(
+  teor: string | null | undefined,
+): PartesSentenca {
+  const vazio: PartesSentenca = {
+    cabecalho: null,
+    relatorio: null,
+    fundamentacao: null,
+    dispositivo: null,
+    dividida: false,
+  };
+  if (!teor || teor.trim().length < 120) return vazio;
+
+  const texto = teor.trim();
+
+  const inicioDispositivo = ultimaOcorrencia(texto, INICIO_DO_DISPOSITIVO);
+
+  // O fim do relatório precisa vir antes do dispositivo; senão o que foi
+  // encontrado é uma palavra solta do próprio dispositivo.
+  const fimRelatorio = primeiraOcorrencia(
+    texto,
+    FIM_DO_RELATORIO,
+    inicioDispositivo > 0 ? inicioDispositivo : 0,
+  );
+
+  if (inicioDispositivo < 0 && fimRelatorio < 0) return vazio;
+
+  const inicioRelatorio = Math.max(
+    0,
+    primeiraOcorrencia(
+      texto,
+      INICIO_DO_RELATORIO,
+      fimRelatorio > 0 ? fimRelatorio : inicioDispositivo,
+    ),
+  );
+
+  // O marcador pertence à parte que ele abre: "É o relatório. Decido."
+  // fecha o relatório, então entra nele.
+  const fimDoTrechoRelatorio =
+    fimRelatorio >= 0
+      ? proximoPonto(texto, fimRelatorio)
+      : inicioDispositivo >= 0
+        ? inicioDispositivo
+        : texto.length;
+
+  const fimFundamentacao = inicioDispositivo >= 0 ? inicioDispositivo : texto.length;
+
+  return {
+    cabecalho: limpar(texto.slice(0, inicioRelatorio)),
+    relatorio: limpar(texto.slice(inicioRelatorio, fimDoTrechoRelatorio)),
+    fundamentacao:
+      fimDoTrechoRelatorio < fimFundamentacao
+        ? limpar(texto.slice(fimDoTrechoRelatorio, fimFundamentacao))
+        : null,
+    dispositivo: inicioDispositivo >= 0 ? limpar(texto.slice(inicioDispositivo)) : null,
+    dividida: true,
+  };
+}
+
+/** Fim da frase que começa em `de` — para não cortar no meio. */
+function proximoPonto(texto: string, de: number): number {
+  const m = texto.slice(de).match(/[.;:]\s/);
+  return m?.index !== undefined ? de + m.index + 1 : de;
+}
+
 function extrairData(texto: string): string | null {
   const m = texto.match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);
   if (!m) return null;

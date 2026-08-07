@@ -17,7 +17,8 @@
     "testar:cnj": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-cnj.mjs",
     "db:instalador": "node scripts/gerar-instalador.mjs",
     "testar:djen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-djen.mjs",
-    "testar:djen:conexao": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-djen-conexao.mjs"
+    "testar:djen:conexao": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-djen-conexao.mjs",
+    "testar:partes": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/testar-partes.mjs"
   },
   "dependencies": {
     "next": "^15.5.22",

@@ -13,6 +13,7 @@ import {
   rotulo,
 } from "@/lib/labels";
 import { Cartao, SeloDesfecho } from "@/components/ui";
+import { dividirSentenca } from "@/lib/integracoes/extracao";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +32,20 @@ export default async function DetalheDecisao({
     d.processo_id ? decisaoLaudos(String(d.processo_id)) : Promise.resolve([]),
   ]);
 
+  // A divisão acontece aqui, na leitura. O texto guardado continua sendo
+  // o publicado — melhorar o reconhecimento não exige reprocessar nada.
+  const partes = dividirSentenca(d.texto_integral as string | null);
+
+  // Processo de terceiro entra pelo mesmo caminho do acervo, mas não é
+  // acervo: chamá-lo de "acervo próprio" na tela desmente o selo da lista
+  // e engana quem estiver lendo a estatística.
+  const deColeta = d.proprio === false;
+
   const campos: [string, React.ReactNode][] = [
-    ["Origem", rotulo(ORIGEM, String(d.origem))],
+    [
+      "Origem",
+      deColeta ? "Coleta do juízo — processo de terceiro" : rotulo(ORIGEM, String(d.origem)),
+    ],
     ["Tipo", rotulo(TIPO_DOCUMENTO, String(d.tipo))],
     ["Instância", rotulo(INSTANCIA, String(d.instancia))],
     ["Órgão julgador", d.orgao_nome ? String(d.orgao_nome) : "—"],
@@ -75,6 +88,14 @@ export default async function DetalheDecisao({
         {d.origem === "jurisprudencia_externa" && (
           <span className="selo selo-neutro">Referência externa</span>
         )}
+        {deColeta && (
+          <span
+            className="selo selo-neutro"
+            title="Processo de terceiro, coletado para medir o comportamento do juízo. Fora da estatística do escritório."
+          >
+            Coleta do juízo
+          </span>
+        )}
         {(d.tags as string[])?.map((t) => (
           <span key={t} className="selo selo-neutro">
             {t}
@@ -94,18 +115,66 @@ export default async function DetalheDecisao({
             </Cartao>
           )}
 
-          {Boolean(d.dispositivo) && (
-            <Cartao titulo="Dispositivo">
-              <p className="texto-peca px-4 py-4">{String(d.dispositivo)}</p>
-            </Cartao>
-          )}
+          {partes.dividida ? (
+            <>
+              {/* A fundamentação vem primeiro porque é o que se lê para
+                  entender o juízo. Relatório e dispositivo ficam abaixo:
+                  um repete o pedido, o outro anuncia o resultado. */}
+              {Boolean(partes.fundamentacao) && (
+                <Cartao
+                  titulo="Fundamentação"
+                  descricao="Onde o juízo diz por que decidiu."
+                >
+                  <div className="texto-peca px-4 py-4">{partes.fundamentacao}</div>
+                </Cartao>
+              )}
 
-          {Boolean(d.texto_integral) && (
-            <Cartao titulo="Inteiro teor">
-              <div className="texto-peca max-h-[32rem] overflow-y-auto px-4 py-4">
-                {String(d.texto_integral)}
-              </div>
-            </Cartao>
+              {Boolean(partes.dispositivo) && (
+                <Cartao titulo="Dispositivo">
+                  <div className="texto-peca px-4 py-4">{partes.dispositivo}</div>
+                </Cartao>
+              )}
+
+              {Boolean(partes.relatorio) && (
+                <Cartao titulo="Relatório">
+                  <div className="texto-peca px-4 py-4">{partes.relatorio}</div>
+                </Cartao>
+              )}
+
+              {Boolean(d.texto_integral) && (
+                <details className="cartao px-4 py-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Texto como publicado
+                  </summary>
+                  <p className="mt-1 text-xs" style={{ color: "var(--tinta-3)" }}>
+                    A divisão acima é feita na leitura. Aqui está o teor
+                    exatamente como o diário publicou.
+                  </p>
+                  <div className="texto-peca mt-3 max-h-[32rem] overflow-y-auto">
+                    {String(d.texto_integral)}
+                  </div>
+                </details>
+              )}
+            </>
+          ) : (
+            <>
+              {Boolean(d.dispositivo) && (
+                <Cartao titulo="Dispositivo">
+                  <p className="texto-peca px-4 py-4">{String(d.dispositivo)}</p>
+                </Cartao>
+              )}
+
+              {Boolean(d.texto_integral) && (
+                <Cartao
+                  titulo="Inteiro teor"
+                  descricao="Não foi possível reconhecer as divisões da peça neste texto."
+                >
+                  <div className="texto-peca max-h-[32rem] overflow-y-auto px-4 py-4">
+                    {String(d.texto_integral)}
+                  </div>
+                </Cartao>
+              )}
+            </>
           )}
 
           {Boolean(d.observacoes) && (

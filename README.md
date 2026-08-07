@@ -292,6 +292,26 @@ nenhuma. O retorno diz qual dos dois aconteceu.
 A aplicação precisa estar no ar. Para sincronizar por cron, chame direto o
 endpoint `POST /api/ingerir` (proteja com `INGESTAO_TOKEN`).
 
+### Lendo a sentença
+
+Sentença lida num bloco só serve para conferir. Para estudar como o juízo
+pensa, o que interessa é a **fundamentação** — separada do relatório, que
+repete o pedido, e do dispositivo, que anuncia o resultado.
+
+A divisão é feita **na leitura**, não na gravação: o teor guardado continua
+sendo exatamente o que o diário publicou, e melhorar o reconhecimento não
+exige reprocessar nada. Aparece em dois lugares:
+
+- **Na própria busca**, com "Apenas testar" marcado: cada sentença encontrada
+  abre e mostra as três partes. Mostra até 30 por vez.
+- **Em Decisões**, depois de gravar: a tela da decisão abre com a
+  fundamentação em primeiro lugar, e guarda o texto como publicado num
+  bloco recolhido.
+
+Quando o texto não deixa reconhecer as divisões — despacho, ementa solta,
+publicação truncada — a tela diz isso e mostra o teor inteiro, em vez de
+inventar um corte.
+
 ### Quando o DJEN responde 403
 
 Um 403 aqui quase nunca tem a ver com o que foi consultado — a requisição é

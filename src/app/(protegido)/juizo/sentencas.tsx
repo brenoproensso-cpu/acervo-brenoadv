@@ -3,6 +3,8 @@
 import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { coletarSentencas, diagnosticarDjen } from "../sincronizacao/actions";
+import { dividirSentenca } from "@/lib/integracoes/extracao";
+import { RESULTADO, rotulo } from "@/lib/labels";
 
 /**
  * Coleta de sentenças no DJEN, por vara ou por magistrado.
@@ -165,7 +167,7 @@ export function FormularioSentencas() {
           <span>
             Apenas testar
             <span className="block text-xs" style={{ color: "var(--tinta-3)" }}>
-              Não grava. Mostra os órgãos encontrados e uma amostra do teor.
+              Não grava. Mostra os órgãos encontrados e deixa ler as sentenças.
             </span>
           </span>
         </label>
@@ -209,6 +211,59 @@ export function FormularioSentencas() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Uma sentença da busca, aberta para leitura.
+ *
+ * Fechada mostra só a identificação; aberta, o texto dividido em
+ * relatório, fundamentação e dispositivo. Sem isso a busca respondia
+ * quantas sentenças existem sem deixar ler nenhuma.
+ */
+function Sentenca({ dados }: { dados: Record<string, unknown> }) {
+  const teor = dados.teor ? String(dados.teor) : "";
+  const partes = dividirSentenca(teor);
+
+  return (
+    <details className="mb-2 border-l-2 pl-3" style={{ borderColor: "var(--marinho)" }}>
+      <summary className="cursor-pointer text-sm">
+        <span className="font-medium">{String(dados.numeroCnj ?? "sem número")}</span>
+        {Boolean(dados.resultado) && (
+          <span className="selo selo-neutro ml-2">
+            {rotulo(RESULTADO, String(dados.resultado))}
+          </span>
+        )}
+        <span className="block text-xs" style={{ color: "var(--tinta-3)" }}>
+          {String(dados.orgao ?? "—")} · {String(dados.data ?? "—")}
+        </span>
+      </summary>
+
+      {partes.dividida ? (
+        <div className="mt-2 space-y-3">
+          {Boolean(partes.fundamentacao) && (
+            <div>
+              <div className="rotulo-campo">Fundamentação</div>
+              <p className="texto-peca text-xs">{partes.fundamentacao}</p>
+            </div>
+          )}
+          {Boolean(partes.dispositivo) && (
+            <div>
+              <div className="rotulo-campo">Dispositivo</div>
+              <p className="texto-peca text-xs">{partes.dispositivo}</p>
+            </div>
+          )}
+          {Boolean(partes.relatorio) && (
+            <div>
+              <div className="rotulo-campo">Relatório</div>
+              <p className="texto-peca text-xs">{partes.relatorio}</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="texto-peca mt-2 text-xs">{teor}</p>
+      )}
+    </details>
   );
 }
 
@@ -314,17 +369,15 @@ function Resultado({ dados }: { dados: Record<string, unknown> }) {
 
       {amostra.length > 0 && (
         <div>
-          <div className="rotulo-campo">Amostra do teor</div>
+          <div className="rotulo-campo">Sentenças encontradas</div>
+          <p className="mb-2 text-xs" style={{ color: "var(--tinta-3)" }}>
+            {Number(dados.amostraDe ?? amostra.length) > amostra.length
+              ? `Mostrando ${amostra.length} das ${String(dados.amostraDe)}. ` +
+                `Desmarque "Apenas testar" para gravar todas e lê-las em Decisões.`
+              : "Clique para ler a sentença dividida em relatório, fundamentação e dispositivo."}
+          </p>
           {amostra.map((a, i) => (
-            <div key={i} className="mb-2 border-l-2 pl-3" style={{ borderColor: "var(--marinho)" }}>
-              <div className="text-xs" style={{ color: "var(--tinta-3)" }}>
-                {String(a.numeroCnj ?? "—")} · {String(a.orgao ?? "—")} ·{" "}
-                {String(a.data ?? "—")}
-              </div>
-              <p className="texto-peca max-h-40 overflow-y-auto text-xs">
-                {String(a.teor ?? "")}
-              </p>
-            </div>
+            <Sentenca key={i} dados={a} />
           ))}
         </div>
       )}

@@ -562,12 +562,18 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
       comAparenciaDeDecisao: candidatas.length,
       porOrgao,
       porResultado,
-      amostra: candidatas.slice(0, 3).map((p) => ({
+      // O teor vai inteiro: sem ele a busca só diz quantas sentenças
+      // existem, e o que se quer é lê-las. O corte em 30 é para o
+      // resultado não virar um megabyte de uma vez — o restante fica
+      // disponível ao gravar.
+      amostraDe: candidatas.length,
+      amostra: candidatas.slice(0, 30).map((p) => ({
         numeroCnj: p.numeroCnj,
         orgao: p.orgao,
         data: p.dataDisponibilizacao,
         tipo: p.tipoComunicacao,
-        teor: p.teor ? `${p.teor.slice(0, 600)}…` : null,
+        resultado: extrairDaDecisao(p.teor).resultado,
+        teor: p.teor ?? null,
       })),
       aviso:
         filtrados.length === 0
