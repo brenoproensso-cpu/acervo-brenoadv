@@ -122,8 +122,16 @@ export default async function DetalheDecisao({
                   um repete o pedido, o outro anuncia o resultado. */}
               {Boolean(partes.fundamentacao) && (
                 <Cartao
-                  titulo="Fundamentação"
-                  descricao="Onde o juízo diz por que decidiu."
+                  titulo={
+                    partes.relatorioSeparado
+                      ? "Fundamentação"
+                      : "Relatório e fundamentação"
+                  }
+                  descricao={
+                    partes.relatorioSeparado
+                      ? "Onde o juízo diz por que decidiu."
+                      : "Esta sentença não marca onde o relatório termina, então as duas partes vêm juntas — separá-las aqui seria adivinhar."
+                  }
                 >
                   <div className="texto-peca px-4 py-4">{partes.fundamentacao}</div>
                 </Cartao>

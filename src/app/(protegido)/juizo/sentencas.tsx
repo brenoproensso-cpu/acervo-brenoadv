@@ -243,7 +243,9 @@ function Sentenca({ dados }: { dados: Record<string, unknown> }) {
         <div className="mt-2 space-y-3">
           {Boolean(partes.fundamentacao) && (
             <div>
-              <div className="rotulo-campo">Fundamentação</div>
+              <div className="rotulo-campo">
+                {partes.relatorioSeparado ? "Fundamentação" : "Relatório e fundamentação"}
+              </div>
               <p className="texto-peca text-xs">{partes.fundamentacao}</p>
             </div>
           )}

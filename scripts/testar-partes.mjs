@@ -133,6 +133,95 @@ casos.push({
   espera: { dividida: false },
 });
 
+// Caso real: sentença de pensão por morte publicada pelo TRF1, extinta
+// sem mérito pelo Tema 1124. Não tem "é o relatório" nem título de
+// seção, e cita "sem resolução do mérito" dentro de ementa do STJ muito
+// antes de chegar ao próprio mérito. A versão anterior cortava ali e
+// jogava metade da peça para dentro do relatório.
+casos.push({
+  nome: "TRF1, sem marcador de relatório, com 'mérito' citado em ementa",
+  teor: `Trata-se de ação proposta por INÊS SOUZA COSTA e M. S. D. L., representadas por sua prima,
+VERA LÚCIA DE JESUS, em desfavor do INSS, objetivando a concessão de benefício de pensão por morte
+decorrente do falecimento de sua genitora, MARINÊS SOUZA COSTA, em 29/01/2024. A pensão por morte é
+o benefício pago aos dependentes do segurado que falecer, aposentado ou não, consoante o art. 201, V,
+da Constituição Federal de 1988. Para sua concessão deve ser provado o óbito, a qualidade de segurado
+do instituidor e a qualidade de dependente da parte requerente. Todavia, ausente início de prova
+material da alegada qualidade de segurada especial da falecida. O rol de documentos hábeis à
+comprovação do exercício de atividade rural, inscrito no art. 106 da Lei 8.213/91, é meramente
+exemplificativo, e não taxativo. Esse juízo tem considerado idôneos documentos contemporâneos ao
+período de carência, tais como Comprovante de ITR e notas fiscais de produtor rural.
+
+A jurisprudência do Superior Tribunal de Justiça é firme no sentido de que a extinção do processo
+sem resolução do mérito (art. 267, IV do CPC) e a consequente possibilidade de o autor intentar
+novamente a ação (art. 268 do CPC), caso reúna os elementos necessários à tal iniciativa.
+6. Recurso Especial do INSS desprovido. (REsp 1352721/SP, Corte Especial, DJe 28/04/2016) Portanto,
+tendo em vista a carência de pressupostos de desenvolvimento válido e regular do processo, deve o
+feito ser extinto sem resolução do mérito, nos termos do art. 485, IV, do CPC. Cumpre esclarecer que,
+conforme entendimento consolidado pelo Superior Tribunal de Justiça no Tema 1124, para a configuração
+do interesse de agir em ações previdenciárias exige-se correspondência entre os fatos e os documentos
+submetidos ao exame administrativo e aqueles levados ao Poder Judiciário. A apresentação direta de
+documentos inéditos apenas em juízo ensejará a extinção da nova demanda sem resolução de mérito, nos
+termos do artigo 485, inciso VI, do Código de Processo Civil, por ausência de interesse de agir.
+
+Ante o exposto, julgo extinto o feito sem resolução de mérito, nos termos do art. 485, IV, do CPC.
+Sem custas e honorários advocatícios. Defiro os benefícios da gratuidade da justiça. Feira de Santana,
+BA, data registrada em sistema. Juiz Federal Substituto DIEGO DE SOUZA LIMA`,
+  espera: {
+    dividida: true,
+    relatorioSeparado: false,
+    fundamentacaoComeca: "Trata-se de ação proposta por INÊS SOUZA COSTA",
+    fundamentacaoContem: "Tema 1124",
+    dispositivoComeca: "Ante o exposto, julgo extinto",
+    dispositivoContem: "DIEGO DE SOUZA LIMA",
+    dispositivoNaoContem: "Tema 1124",
+  },
+});
+
+casos.push({
+  nome: "'Mérito' como título de seção continua separando",
+  teor: `SENTENÇA. Trata-se de pedido de aposentadoria por idade rural formulado em face do INSS.
+Citada, a autarquia contestou. Foi colhida prova testemunhal em audiência.
+
+MÉRITO
+
+A aposentadoria por idade rural exige início de prova material corroborado por prova testemunhal
+idônea, nos termos da Súmula 149 do STJ. No caso, os documentos juntados são contemporâneos ao
+período de carência e as testemunhas foram uníssonas quanto ao labor rural da parte autora.
+
+Pelo exposto, JULGO PROCEDENTE o pedido para conceder a aposentadoria por idade rural.`,
+  espera: {
+    dividida: true,
+    relatorioSeparado: true,
+    relatorioContem: "prova testemunhal em audiência",
+    fundamentacaoContem: "Súmula 149 do STJ",
+    dispositivoContem: "JULGO PROCEDENTE",
+  },
+});
+
+casos.push({
+  nome: "Sem 'exposto', o dispositivo é achado pelo verbo",
+  teor: `SENTENÇA. Trata-se de ação de restabelecimento de auxílio por incapacidade temporária.
+É o relatório. Decido.
+
+A perícia médica concluiu pela ausência de incapacidade laborativa atual, e não há nos autos
+elemento técnico capaz de infirmar essa conclusão. A parte autora não se desincumbiu do ônus
+que lhe cabia quanto ao fato constitutivo do seu direito.
+
+JULGO IMPROCEDENTE o pedido, extinguindo o feito com resolução do mérito, nos termos do
+art. 487, I, do CPC. Sem custas e honorários nesta instância.`,
+  espera: {
+    dividida: true,
+    relatorioSeparado: true,
+    dispositivoComeca: "JULGO IMPROCEDENTE",
+    fundamentacaoContem: "ausência de incapacidade",
+  },
+});
+
+// As sentenças de teste têm quebra de linha no meio das frases, como as
+// de verdade. A comparação é de conteúdo, não de diagramação.
+const texto = (s) => (s ?? "").replace(/\s+/g, " ").trim();
+const contem = (parte, trecho) => texto(parte).includes(texto(trecho));
+
 let falhas = 0;
 const conferir = (nome, ok, detalhe = "") => {
   if (!ok) falhas++;
@@ -147,11 +236,35 @@ for (const caso of casos) {
   conferir("dividida", p.dividida === e.dividida, `${p.dividida}`);
   if (!e.dividida) continue;
 
+  if (e.relatorioSeparado !== undefined) {
+    conferir(
+      e.relatorioSeparado
+        ? "separa relatório de fundamentação"
+        : "não inventa corte entre relatório e fundamentação",
+      p.relatorioSeparado === e.relatorioSeparado,
+      `${p.relatorioSeparado}`,
+    );
+  }
+  if (e.fundamentacaoComeca) {
+    conferir(
+      "fundamentação começa onde deve",
+      texto(p.fundamentacao).startsWith(texto(e.fundamentacaoComeca)),
+      `${(p.fundamentacao ?? "").slice(0, 45)}…`,
+    );
+  }
+  if (e.dispositivoComeca) {
+    conferir(
+      "dispositivo começa onde deve",
+      texto(p.dispositivo).startsWith(texto(e.dispositivoComeca)),
+      `${(p.dispositivo ?? "").slice(0, 45)}…`,
+    );
+  }
+
   if (e.cabecalhoContem) {
-    conferir("cabeçalho separado", (p.cabecalho ?? "").includes(e.cabecalhoContem));
+    conferir("cabeçalho separado", contem(p.cabecalho, e.cabecalhoContem));
   }
   if (e.relatorioContem) {
-    conferir("relatório", (p.relatorio ?? "").includes(e.relatorioContem));
+    conferir("relatório", contem(p.relatorio, e.relatorioContem));
   }
   if (e.relatorioTermina) {
     conferir(
@@ -161,21 +274,21 @@ for (const caso of casos) {
     );
   }
   if (e.fundamentacaoContem) {
-    conferir("fundamentação", (p.fundamentacao ?? "").includes(e.fundamentacaoContem));
+    conferir("fundamentação", contem(p.fundamentacao, e.fundamentacaoContem));
   }
   if (e.fundamentacaoNaoContem) {
     conferir(
       "fundamentação não invade o dispositivo",
-      !(p.fundamentacao ?? "").includes(e.fundamentacaoNaoContem),
+      !contem(p.fundamentacao, e.fundamentacaoNaoContem),
     );
   }
   if (e.dispositivoContem) {
-    conferir("dispositivo", (p.dispositivo ?? "").includes(e.dispositivoContem));
+    conferir("dispositivo", contem(p.dispositivo, e.dispositivoContem));
   }
   if (e.dispositivoNaoContem) {
     conferir(
       "dispositivo não pega a citação do meio",
-      !(p.dispositivo ?? "").includes(e.dispositivoNaoContem),
+      !contem(p.dispositivo, e.dispositivoNaoContem),
     );
   }
 

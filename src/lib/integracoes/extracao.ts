@@ -455,21 +455,44 @@ export type PartesSentenca = {
   dispositivo: string | null;
   /** Falso quando o texto não deixou reconhecer as divisões. */
   dividida: boolean;
+  /**
+   * Falso quando não havia marcador forte separando relatório de
+   * fundamentação — nesse caso os dois vêm juntos em `fundamentacao`.
+   */
+  relatorioSeparado: boolean;
 };
 
-/** Onde o relatório termina e o juízo começa a decidir. */
-const FIM_DO_RELATORIO = [
-  /é\s+o\s+(breve\s+|sucinto\s+|relat[óo]rio\b)/i,
-  /dispensad[oa]\s+o\s+relat[óo]rio/i,
-  /relat[óo]rio\s+dispensado/i,
-  /\bfundamenta[çc][ãa]o\b/i,
-  /\bfundamento\s+e\s+decido\b/i,
-  /\bpasso\s+a\s+decidir\b/i,
-  /\bdecido\b/i,
-  /\bm[ée]rito\b/i,
+/**
+ * Marcadores que separam o relatório da fundamentação.
+ *
+ * Todos são FORTES de propósito: só entram expressões que não aparecem
+ * no meio de uma citação. "Mérito" e "fundamentação" soltos já estiveram
+ * nesta lista e cortavam a peça no lugar errado — uma sentença
+ * previdenciária diz "sem resolução do mérito" dentro de ementa citada
+ * antes de chegar ao próprio mérito. Por isso essas duas só valem como
+ * título de seção, sozinhas na linha.
+ */
+const FIM_DO_RELATORIO: { re: RegExp; titulo: boolean }[] = [
+  { re: /é\s+o\s+(?:breve\s+|sucinto\s+|conciso\s+)?relat[óo]rio/i, titulo: false },
+  { re: /relat[óo]rio\s+dispensado/i, titulo: false },
+  { re: /dispensad[oa]\s+(?:o\s+)?relat[óo]rio/i, titulo: false },
+  {
+    re: /^\s*(?:i{1,3}\s*[-–.)]\s*)?(?:d[ao]\s+)?fundamenta[çc][ãa]o\s*[:.]?\s*$/im,
+    titulo: true,
+  },
+  { re: /^\s*(?:i{1,3}\s*[-–.)]\s*)?(?:d[ao]\s+)?m[ée]rito\s*[:.]?\s*$/im, titulo: true },
+  { re: /\bfundamento\s+e\s+decido\b/i, titulo: false },
+  { re: /\bpasso\s+a\s+decidir\b/i, titulo: false },
+  { re: /(?:^|[.;]\s)\s*decido\s*[.:]/i, titulo: false },
 ];
 
-/** Onde começa o dispositivo. */
+/**
+ * Onde começa o dispositivo.
+ *
+ * A busca é pela ÚLTIMA ocorrência: "ante o exposto" aparece dentro de
+ * acórdão transcrito com frequência, e o dispositivo de verdade é sempre
+ * o último.
+ */
 const INICIO_DO_DISPOSITIVO = [
   /\bante\s+o\s+exposto\b/i,
   /\bdiante\s+do\s+exposto\b/i,
@@ -479,30 +502,47 @@ const INICIO_DO_DISPOSITIVO = [
   /\bdo\s+exposto\b/i,
   /\bem\s+face\s+do\s+exposto\b/i,
   /\bpor\s+todo\s+o\s+exposto\b/i,
-  /^\s*(?:i{1,3}\s*[-–.)]\s*)?dispositivo\s*$/im,
+  /^\s*(?:i{1,3}\s*[-–.)]\s*)?dispositivo\s*[:.]?\s*$/im,
 ];
 
-/** Onde o relatório começa, quando há cabeçalho antes dele. */
+/** Usado só quando nenhum marcador de dispositivo aparece. */
+const DISPOSITIVO_IMPLICITO = [
+  /\bjulgo\s+(?:extinto|procedente|improcedente|parcialmente)/i,
+  /\bdefiro\s+o\s+pedido\b/i,
+  /\bindefiro\s+o\s+pedido\b/i,
+];
+
+/** Onde o relatório começa, quando há cabeçalho de autuação antes dele. */
 const INICIO_DO_RELATORIO = [
-  /^\s*(?:i\s*[-–.)]\s*)?relat[óo]rio\s*$/im,
+  /^\s*(?:i\s*[-–.)]\s*)?relat[óo]rio\s*[:.]?\s*$/im,
   /\btrata-se\s+de\b/i,
   /\bcuida-se\s+de\b/i,
   /\bvistos[,.\s]/i,
 ];
 
-/**
- * Última ocorrência de um dos padrões — e não a primeira.
- *
- * "Ante o exposto" aparece citado no meio da fundamentação com alguma
- * frequência (transcrição de acórdão, por exemplo). O dispositivo de
- * verdade é o último.
- */
+/** Última ocorrência de um dos padrões. */
 function ultimaOcorrencia(texto: string, padroes: RegExp[]): number {
   let melhor = -1;
   for (const p of padroes) {
     const re = new RegExp(p.source, p.flags.includes("g") ? p.flags : `${p.flags}g`);
     for (const m of texto.matchAll(re)) {
       if (m.index !== undefined && m.index > melhor) melhor = m.index;
+    }
+  }
+  return melhor;
+}
+
+/** Primeiro marcador de fim de relatório antes do dispositivo. */
+function primeiroCorte(
+  texto: string,
+  ate: number,
+): { indice: number; titulo: boolean } | null {
+  let melhor: { indice: number; titulo: boolean } | null = null;
+  const janela = texto.slice(0, ate);
+  for (const { re, titulo } of FIM_DO_RELATORIO) {
+    const m = janela.match(re);
+    if (m?.index !== undefined && (melhor === null || m.index < melhor.indice)) {
+      melhor = { indice: m.index, titulo };
     }
   }
   return melhor;
@@ -532,22 +572,26 @@ export function dividirSentenca(
     fundamentacao: null,
     dispositivo: null,
     dividida: false,
+    relatorioSeparado: false,
   };
   if (!teor || teor.trim().length < 120) return vazio;
 
   const texto = teor.trim();
 
-  const inicioDispositivo = ultimaOcorrencia(texto, INICIO_DO_DISPOSITIVO);
+  let inicioDispositivo = ultimaOcorrencia(texto, INICIO_DO_DISPOSITIVO);
+  if (inicioDispositivo < 0) {
+    inicioDispositivo = ultimaOcorrencia(texto, DISPOSITIVO_IMPLICITO);
+  }
 
-  // O fim do relatório precisa vir antes do dispositivo; senão o que foi
-  // encontrado é uma palavra solta do próprio dispositivo.
-  const fimRelatorio = primeiraOcorrencia(
-    texto,
-    FIM_DO_RELATORIO,
-    inicioDispositivo > 0 ? inicioDispositivo : 0,
-  );
+  // Sem dispositivo não há divisão confiável: é o único ponto que se
+  // reconhece com segurança em qualquer redação.
+  if (inicioDispositivo < 0) return vazio;
 
-  if (inicioDispositivo < 0 && fimRelatorio < 0) return vazio;
+  // O corte entre relatório e fundamentação precisa vir antes do
+  // dispositivo — senão o marcador encontrado pertence ao próprio
+  // dispositivo, não à peça.
+  const corte = primeiroCorte(texto, inicioDispositivo);
+  const fimRelatorio = corte?.indice ?? -1;
 
   const inicioRelatorio = Math.max(
     0,
@@ -558,26 +602,37 @@ export function dividirSentenca(
     ),
   );
 
-  // O marcador pertence à parte que ele abre: "É o relatório. Decido."
-  // fecha o relatório, então entra nele.
-  const fimDoTrechoRelatorio =
-    fimRelatorio >= 0
-      ? proximoPonto(texto, fimRelatorio)
-      : inicioDispositivo >= 0
-        ? inicioDispositivo
-        : texto.length;
+  // Sem marcador forte, relatório e fundamentação continuam juntos. Um
+  // corte adivinhado é pior que corte nenhum: dá ao texto uma estrutura
+  // que ele não tem, e quem lê acredita.
+  if (!corte) {
+    return {
+      cabecalho: limpar(texto.slice(0, inicioRelatorio)),
+      relatorio: null,
+      fundamentacao: limpar(texto.slice(inicioRelatorio, inicioDispositivo)),
+      dispositivo: limpar(texto.slice(inicioDispositivo)),
+      dividida: true,
+      relatorioSeparado: false,
+    };
+  }
 
-  const fimFundamentacao = inicioDispositivo >= 0 ? inicioDispositivo : texto.length;
+  // Marcador em prosa fecha o relatório e entra nele — "É o relatório."
+  // pertence ao relatório. Título abre a seção seguinte, então fica de
+  // fora: "MÉRITO" é da fundamentação.
+  const fimDoTrechoRelatorio = corte.titulo
+    ? corte.indice
+    : proximoPonto(texto, corte.indice);
 
   return {
     cabecalho: limpar(texto.slice(0, inicioRelatorio)),
     relatorio: limpar(texto.slice(inicioRelatorio, fimDoTrechoRelatorio)),
     fundamentacao:
-      fimDoTrechoRelatorio < fimFundamentacao
-        ? limpar(texto.slice(fimDoTrechoRelatorio, fimFundamentacao))
+      fimDoTrechoRelatorio < inicioDispositivo
+        ? limpar(texto.slice(fimDoTrechoRelatorio, inicioDispositivo))
         : null,
-    dispositivo: inicioDispositivo >= 0 ? limpar(texto.slice(inicioDispositivo)) : null,
+    dispositivo: limpar(texto.slice(inicioDispositivo)),
     dividida: true,
+    relatorioSeparado: true,
   };
 }
 
@@ -594,4 +649,219 @@ function extrairData(texto: string): string | null {
   const ano = Number(a);
   if (ano < 1990 || ano > new Date().getFullYear() + 1) return null;
   return `${a}-${mes}-${d}`;
+}
+
+// =====================================================================
+// Quem assinou e o que a perícia disse — lidos da própria sentença
+// =====================================================================
+// O DJEN identifica o órgão, nunca o magistrado, e não traz laudo algum.
+// Mas a sentença assina no fim e resume a perícia na fundamentação. É de
+// lá que sai o material para medir juiz e perito a partir de sentença
+// pública — sem acesso aos autos.
+//
+// Os dois são leitura de texto, então entram como `extraido_automatico`:
+// aparecem na tela, ficam fora da estatística até alguém conferir.
+// =====================================================================
+
+const CARGOS =
+  "ju[ií]z(?:a)?\\s+(?:federal|de\\s+direito|do\\s+trabalho)(?:\\s+substitut[oa])?" +
+  "|desembargador(?:a)?(?:\\s+federal)?" +
+  "|ju[ií]z(?:a)?\\s+relator(?:a)?" +
+  "|ju[ií]z(?:a)?";
+
+/**
+ * Nome plausível de pessoa.
+ *
+ * Deliberadamente SEM a flag `i`: é a maiúscula inicial que distingue um
+ * nome do resto da frase. Com `i`, "perito judicial Dr. Ricardo Alves
+ * Menezes concluiu pela incapacidade" devolvia o nome com o verbo e o
+ * complemento grudados — e cada variação viraria um perito diferente na
+ * estatística. Aceita nome em caixa alta, que é como o diário publica.
+ */
+const PALAVRA = "[A-ZÁÀÂÃÉÊÍÓÔÕÚÜÇ][\\wÁ-Úá-úçÇ']+";
+const CONECTOR = "d[aeo]s?|D[AEO]S?|De|Da|Do|Das|Dos|e|E";
+const NOME = `${PALAVRA}(?:\\s+(?:${CONECTOR}|${PALAVRA})){1,5}`;
+
+const RE_NOME_APOS = new RegExp(`^\\s*[:\\-–,]?\\s*(?:Dr\\.?a?\\.?\\s*)?(${NOME})`);
+const RE_NOME_ANTES = new RegExp(`(${NOME})\\s*[,\\-–]?\\s*$`);
+
+export type Assinatura = { nome: string; cargo: string | null };
+
+/**
+ * Magistrado que assinou. Procura no fim da peça, que é onde a
+ * assinatura fica, nas duas ordens usuais: cargo antes do nome
+ * ("Juiz Federal Substituto FULANO") ou nome antes do cargo.
+ */
+export function extrairMagistradoAssinante(
+  teor: string | null | undefined,
+): Assinatura | null {
+  if (!teor) return null;
+
+  // A assinatura está no rodapé. Olhar a peça inteira faria o nome da
+  // parte, do advogado ou do perito passar por magistrado.
+  const fim = teor.slice(-1200);
+
+  // As bordas de palavra são indispensáveis: sem elas "JUIZADO ESPECIAL
+  // FEDERAL DE SOROCABA" — cabeçalho de toda sentença de JEF — casa com
+  // "JUIZA" e o cabeçalho vira assinatura.
+  const reCargo = new RegExp(`\\b(${CARGOS})\\b`, "gi");
+  const achados = [...fim.matchAll(reCargo)];
+
+  // De trás para a frente: a assinatura é a última menção a cargo, e as
+  // anteriores costumam ser citação ("conforme decidiu o Juiz Federal...").
+  for (let i = achados.length - 1; i >= 0; i--) {
+    const m = achados[i];
+    if (m.index === undefined) continue;
+    const cargo = arrumarCargo(m[1]);
+
+    const depois = fim.slice(m.index + m[0].length, m.index + m[0].length + 90);
+    const a = depois.match(RE_NOME_APOS);
+    if (a && nomePlausivel(a[1])) return { nome: arrumarNome(a[1]), cargo };
+
+    const antes = fim.slice(Math.max(0, m.index - 90), m.index);
+    const b = antes.match(RE_NOME_ANTES);
+    if (b && nomePlausivel(b[1])) return { nome: arrumarNome(b[1]), cargo };
+  }
+
+  return null;
+}
+
+/**
+ * Filtra o que casou com o formato de nome mas não é nome de gente.
+ *
+ * Sem isto, um trecho como "DO EXPOSTO JULGO" tem maiúscula e mais de
+ * uma palavra, e entraria como magistrado — criando um registro que
+ * depois aparece na estatística como se fosse um juiz.
+ */
+function nomePlausivel(bruto: string): boolean {
+  const palavras = bruto.trim().split(/\s+/).filter((p) => p.length > 2);
+  if (palavras.length < 2) return false;
+  if (bruto.replace(/\s+/g, "").length < 8) return false;
+
+  const jargao =
+    /^(exposto|posto|julgo|sentença|processo|autos|parte|autora|réu|inss|vara|juizado|federal|especial|c[ií]vel|criminal|turma|se[çc][ãa]o|tribunal|regi[ãa]o)$/i;
+  return !palavras.every((p) => jargao.test(p)) && !jargao.test(palavras[0]);
+}
+
+/** "DIEGO DE SOUZA LIMA" -> "Diego de Souza Lima". */
+function arrumarNome(bruto: string): string {
+  const minusculas = new Set(["de", "da", "do", "das", "dos", "e"]);
+  return bruto
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((p, i) => {
+      const b = p.toLowerCase();
+      if (i > 0 && minusculas.has(b)) return b;
+      return b.charAt(0).toUpperCase() + b.slice(1);
+    })
+    .join(" ");
+}
+
+function arrumarCargo(bruto: string): string {
+  return arrumarNome(bruto.replace(/\s+/g, " "));
+}
+
+export type PericiaNaSentenca = {
+  /** A sentença fala de perícia? Se não, não é caso de incapacidade. */
+  mencionaPericia: boolean;
+  /** Conclusão como a sentença a relata — não o laudo original. */
+  conclusao: ConclusaoPericial | null;
+  confianca: number;
+  perito: string | null;
+  /** O trecho lido, para conferência humana. */
+  trecho: string | null;
+};
+
+const MENCAO_PERICIA =
+  /\bperit[oa]\b|\bper[ií]cia\b|\blaudo\s+(?:pericial|m[ée]dico)\b|\bexame\s+pericial\b/i;
+
+/**
+ * O que a sentença diz que a perícia concluiu.
+ *
+ * Não substitui o laudo: é o resumo do juízo sobre ele. Serve para medir
+ * a relação entre conclusão pericial e desfecho quando não há acesso aos
+ * autos — que é o caso de toda sentença vinda do diário.
+ */
+export function extrairPericiaDaSentenca(
+  teor: string | null | undefined,
+): PericiaNaSentenca {
+  const vazio: PericiaNaSentenca = {
+    mencionaPericia: false,
+    conclusao: null,
+    confianca: 0,
+    perito: null,
+    trecho: null,
+  };
+  if (!teor || teor.trim().length < 120) return vazio;
+
+  if (!MENCAO_PERICIA.test(teor)) return vazio;
+
+  // Recorta o entorno das menções à perícia. A sentença fala de
+  // incapacidade em vários pontos — inclusive ao descrever o que a parte
+  // alega —, e só o que está perto da perícia é conclusão pericial.
+  const trechos: string[] = [];
+  const re = new RegExp(MENCAO_PERICIA.source, "gi");
+  for (const m of teor.matchAll(re)) {
+    if (m.index === undefined) continue;
+    trechos.push(teor.slice(Math.max(0, m.index - 200), m.index + 400));
+    if (trechos.length >= 6) break;
+  }
+
+  const regiao = trechos.join(" … ");
+  const alvo = chave(regiao);
+
+  let conclusao: ConclusaoPericial | null = null;
+  let confianca = 0;
+  for (const regra of REGRAS) {
+    if (regra.padroes.some((p) => p.test(alvo))) {
+      conclusao = regra.conclusao;
+      // Resumo de terceiro sobre o laudo vale menos que o laudo.
+      confianca = regra.peso * 0.7;
+      break;
+    }
+  }
+
+  if (!conclusao && GENERICO_COM_INCAPACIDADE.some((p) => p.test(alvo))) {
+    conclusao = "incapacidade_total_temporaria";
+    confianca = 0.25;
+  }
+
+  return {
+    mencionaPericia: true,
+    conclusao,
+    confianca: Math.round(Math.min(confianca, 0.7) * 100) / 100,
+    perito: extrairPeritoDaSentenca(regiao),
+    trecho: regiao.slice(0, 800).trim(),
+  };
+}
+
+/**
+ * Nome do perito quando a sentença o cita.
+ *
+ * Muitas sentenças dizem apenas "o perito judicial concluiu", sem nome —
+ * nesse caso não há o que extrair, e forçar um palpite criaria perito
+ * fantasma na estatística.
+ */
+function extrairPeritoDaSentenca(regiao: string): string | null {
+  // O rótulo é procurado sem distinguir caixa; o nome, com — é a
+  // maiúscula que marca onde ele termina.
+  const rotulos = [
+    /perit[oa]\s+(?:judicial|m[ée]dic[oa]|do\s+ju[ií]zo|nomead[oa])?[,\s]*/gi,
+    /laudo\s+(?:pericial\s+)?d[oa]\s+/gi,
+  ];
+
+  for (const rotulo of rotulos) {
+    for (const m of regiao.matchAll(rotulo)) {
+      if (m.index === undefined) continue;
+      const depois = regiao.slice(m.index + m[0].length, m.index + m[0].length + 90);
+      const achou = depois.match(RE_NOME_APOS);
+      if (!achou) continue;
+      const nome = arrumarNome(achou[1]);
+      // Nome de gente tem sobrenome. "Judicial" sozinho, não.
+      if (!nome.includes(" ")) continue;
+      return nome;
+    }
+  }
+  return null;
 }

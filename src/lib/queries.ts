@@ -120,6 +120,25 @@ export const orgaoDesempenho = () =>
     "select * from vw_orgao_desempenho order by total desc, orgao_nome",
   );
 
+// ---------------------------------------------------------------------
+// Coleta do juízo: magistrado e perito medidos em sentenças de terceiros.
+//
+// Números lidos automaticamente do texto publicado. Toda tela que os usa
+// precisa dizer isso — não têm o mesmo grau de certeza do acervo, que
+// passa por conferência humana.
+// ---------------------------------------------------------------------
+export const magistradosDaColeta = () =>
+  consultar(
+    "select * from vw_magistrado_benchmark order by total desc, magistrado_nome limit 50",
+  );
+
+export const peritosDaColeta = () =>
+  consultar(
+    "select * from vw_perito_benchmark order by total_casos desc, perito_nome limit 50",
+  );
+
+export const coberturaDaColeta = () => consultarUm("select * from vw_coleta_cobertura");
+
 export const magistradoDesempenho = () =>
   consultar(
     "select * from vw_magistrado_desempenho order by total desc, magistrado_nome",

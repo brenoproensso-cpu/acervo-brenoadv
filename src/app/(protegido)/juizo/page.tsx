@@ -3,6 +3,7 @@ import { usuarioAtual } from "@/lib/auth";
 import { consultar } from "@/lib/db";
 import { dataBR, num, pct } from "@/lib/labels";
 import { AvisoAmostra, BarraDesfecho, Cartao, TituloPagina, Vazio } from "@/components/ui";
+import { coberturaDaColeta, magistradosDaColeta } from "@/lib/queries";
 import { FormularioColeta } from "./coleta";
 import { FormularioSentencas } from "./sentencas";
 
@@ -12,11 +13,13 @@ export default async function Juizo() {
   const eu = await usuarioAtual();
   if (!eu) redirect("/login");
 
-  const [comparativo, porClasse] = await Promise.all([
+  const [comparativo, porClasse, magistrados, cobertura] = await Promise.all([
     consultar("select * from vw_juizo_comparativo limit 50"),
     consultar(
       "select * from vw_juizo_por_classe order by total desc limit 30",
     ),
+    magistradosDaColeta(),
+    coberturaDaColeta(),
   ]);
 
   const podeColetar = eu.papel !== "colaborador";
@@ -117,6 +120,85 @@ export default async function Juizo() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </Cartao>
+      )}
+
+      {magistrados.length > 0 && (
+        <Cartao
+          titulo="Por magistrado"
+          descricao="Quem assinou cada sentença coletada, lido do rodapé da própria peça."
+          className="mb-6"
+        >
+          <p
+            className="border-b px-4 pb-3 text-xs leading-relaxed"
+            style={{ color: "var(--tinta-3)" }}
+          >
+            O DJEN não informa o magistrado em campo próprio — o nome é lido da
+            assinatura. Variação de grafia entre publicações pode partir o
+            histórico de um mesmo juiz em dois registros; confira antes de citar
+            um número destes.
+            {Boolean(cobertura?.sentencas) && (
+              <>
+                {" "}
+                Assinatura reconhecida em {String(cobertura?.com_magistrado ?? 0)}{" "}
+                de {String(cobertura?.sentencas ?? 0)} sentenças coletadas
+                {cobertura?.pct_magistrado ? ` (${pct(cobertura.pct_magistrado)})` : ""}.
+              </>
+            )}
+          </p>
+          <div className="tabela-rolavel">
+            <table className="dados">
+              <thead>
+                <tr>
+                  <th>Magistrado</th>
+                  <th>Órgão</th>
+                  <th className="num">Sentenças</th>
+                  <th>Procedência</th>
+                  <th className="num">Laudo favorável</th>
+                  <th className="num">Acompanhou</th>
+                  <th className="num">Concedeu contra o laudo</th>
+                  <th>Período</th>
+                </tr>
+              </thead>
+              <tbody>
+                {magistrados.map((m, i) => (
+                  <tr key={i}>
+                    <td>
+                      <div className="font-medium">{String(m.magistrado_nome)}</div>
+                      {Boolean(m.magistrado_cargo) && (
+                        <div className="text-xs" style={{ color: "var(--tinta-3)" }}>
+                          {String(m.magistrado_cargo)}
+                        </div>
+                      )}
+                    </td>
+                    <td>{m.orgao_nome ? String(m.orgao_nome) : "—"}</td>
+                    <td className="num tabular-nums">{num(m.total)}</td>
+                    <td>
+                      <BarraDesfecho favoraveis={m.favoraveis} total={m.total} />
+                      <AvisoAmostra total={m.total} />
+                    </td>
+                    <td className="num tabular-nums">{num(m.laudos_favoraveis)}</td>
+                    <td className="num tabular-nums">
+                      {num(m.acompanhou_laudo_favoravel)}
+                    </td>
+                    <td
+                      className="num tabular-nums font-medium"
+                      title="Sentenças favoráveis apesar de o laudo não reconhecer incapacidade. É o número que diz se vale sustentar condições pessoais."
+                      style={{
+                        color: Number(m.concedeu_contra_laudo) > 0 ? "var(--exito)" : undefined,
+                      }}
+                    >
+                      {num(m.concedeu_contra_laudo)}
+                    </td>
+                    <td className="text-xs" style={{ color: "var(--tinta-3)" }}>
+                      {dataBR(m.primeira_decisao as string)} a{" "}
+                      {dataBR(m.ultima_decisao as string)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

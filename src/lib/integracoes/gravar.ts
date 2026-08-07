@@ -7,7 +7,12 @@
  */
 
 import { consultar, consultarUm } from "@/lib/db";
-import { extrairDaDecisao, extrairDoLaudo } from "./extracao";
+import {
+  extrairDaDecisao,
+  extrairDoLaudo,
+  extrairMagistradoAssinante,
+  extrairPericiaDaSentenca,
+} from "./extracao";
 import { desfechoDosMovimentos } from "./datajud";
 import { estimarPrazoDias } from "./djen";
 import type {
@@ -418,6 +423,41 @@ async function criarLaudoDeDocumento(
  * Fontes" precisam cair no mesmo registro — senão a estatística de um
  * mesmo perito se divide em duas linhas.
  */
+/**
+ * Magistrado pelo nome, criando se ainda não houver.
+ *
+ * O DJEN nunca diz quem assinou — o nome vem lido do rodapé da sentença.
+ * Por isso o cadastro nasce marcado como automático: a grafia pode variar
+ * entre publicações do mesmo juiz, e juntar dois registros depois é bem
+ * mais fácil que descobrir que a taxa saiu partida em dois.
+ */
+export async function garantirMagistrado(
+  nome: string,
+  orgaoId: string | null,
+  cargo: string | null,
+): Promise<string | null> {
+  const limpo = nome.replace(/\s+/g, " ").trim();
+  if (limpo.length < 6 || !limpo.includes(" ")) return null;
+
+  const achado = await consultarUm<{ id: string }>(
+    `select id from magistrado
+     where lower(unaccent(nome)) = lower(unaccent($1))
+     limit 1`,
+    [limpo],
+  );
+  if (achado) return achado.id;
+
+  const novo = await consultarUm<{ id: string }>(
+    `insert into magistrado (nome, orgao_julgador_id, cargo, observacoes)
+     values ($1, $2::uuid, $3, 'Lido da assinatura de sentença publicada no DJEN. Confira a grafia.')
+     on conflict (nome) do update set
+       orgao_julgador_id = coalesce(magistrado.orgao_julgador_id, excluded.orgao_julgador_id)
+     returning id`,
+    [limpo, orgaoId, cargo],
+  );
+  return novo?.id ?? null;
+}
+
 export async function garantirPerito(nome: string): Promise<string | null> {
   const limpo = nome
     .replace(/^\s*(dr|dra|drª|sr|sra)\.?\s+/i, "")
@@ -703,6 +743,14 @@ export async function gravarSentencaColetada(
 
   const dataDecisao = e.dataDecisao ?? p.dataDisponibilizacao ?? null;
 
+  // Quem assinou. O DJEN identifica o órgão, nunca o magistrado — mas a
+  // sentença assina no rodapé. Sem isto não há como medir juiz nenhum a
+  // partir do diário, que é metade da pergunta que a ferramenta responde.
+  const assinatura = extrairMagistradoAssinante(p.teor);
+  const magistradoId = assinatura
+    ? await garantirMagistrado(assinatura.nome, orgaoId, assinatura.cargo)
+    : null;
+
   const jaTem = await consultarUm<{ id: string }>(
     `select id from decisao
      where processo_id = $1::uuid and resultado = $2::resultado_julgamento
@@ -712,14 +760,19 @@ export async function gravarSentencaColetada(
   );
   if (jaTem) return { novo: !existente, decisaoCriada: false, motivo: "decisão já registrada" };
 
+  // O que a sentença diz que a perícia concluiu. Não é o laudo: é o
+  // resumo do juízo sobre ele. Entra como extração automática e fica
+  // fora da estatística até alguém conferir contra o texto.
+  await registrarPericiaRelatada(processoId, p.teor, dataDecisao);
+
   await consultar(
     `insert into decisao (
        origem, tipo, titulo, processo_id, numero_cnj, orgao_julgador_id, tribunal,
-       instancia, data_decisao, data_publicacao, resultado, texto_integral,
-       dispositivo, fonte, origem_dado, observacoes
+       magistrado_id, instancia, data_decisao, data_publicacao, resultado,
+       texto_integral, dispositivo, fonte, origem_dado, observacoes
      ) values (
        'acervo_proprio', 'sentenca', $1, $2::uuid, $3, $4::uuid, $5,
-       'primeiro_grau', $6::date, $7::date, $8::resultado_julgamento, $9,
+       $11::uuid, 'primeiro_grau', $6::date, $7::date, $8::resultado_julgamento, $9,
        $10, 'djen', 'extraido_automatico',
        'Sentença de terceiro, coletada do DJEN para medir o juízo. Desfecho lido do dispositivo.'
      )`,
@@ -734,8 +787,50 @@ export async function gravarSentencaColetada(
       e.resultado,
       p.teor,
       e.trecho,
+      magistradoId,
     ],
   );
 
   return { novo: !existente, decisaoCriada: true };
+}
+
+/**
+ * Registra a conclusão pericial como a sentença a relata.
+ *
+ * É o elo que permite cruzar perito com desfecho sem ter o laudo: a
+ * sentença quase sempre resume o que o perito concluiu, e é esse resumo
+ * que vira o par conclusão × resultado.
+ *
+ * Fica fora da estatística até conferência, como todo laudo lido de
+ * texto. A diferença é que aqui há duas camadas de intermediação — o
+ * perito escreveu, o juiz resumiu, a máquina leu —, e por isso a
+ * confiança já sai reduzida na extração.
+ */
+async function registrarPericiaRelatada(
+  processoId: string,
+  teor: string | null | undefined,
+  dataDecisao: string | null,
+): Promise<void> {
+  const pericia = extrairPericiaDaSentenca(teor);
+  if (!pericia.conclusao) return;
+
+  const jaTem = await consultarUm<{ id: string }>(
+    "select id from laudo_pericial where processo_id = $1::uuid limit 1",
+    [processoId],
+  );
+  if (jaTem) return;
+
+  const peritoId = pericia.perito ? await garantirPerito(pericia.perito) : null;
+
+  await consultar(
+    `insert into laudo_pericial (
+       processo_id, perito_id, data_laudo, conclusao, origem_dado,
+       confianca, trecho_conclusao, resumo
+     ) values (
+       $1::uuid, $2::uuid, $3::date, $4::conclusao_pericial, 'extraido_automatico',
+       $5, $6,
+       'Conclusão pericial como relatada na sentença publicada no DJEN, não lida do laudo. Confira antes de usar.'
+     )`,
+    [processoId, peritoId, dataDecisao, pericia.conclusao, pericia.confianca, pericia.trecho],
+  );
 }

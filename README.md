@@ -312,6 +312,36 @@ Quando o texto não deixa reconhecer as divisões — despacho, ementa solta,
 publicação truncada — a tela diz isso e mostra o teor inteiro, em vez de
 inventar um corte.
 
+### Medindo magistrado e perito pela sentença publicada
+
+O DJEN identifica o órgão julgador, nunca quem assinou, e não entrega laudo
+nenhum. Mas a sentença traz as duas coisas no texto: a assinatura no rodapé e
+o resumo do laudo na fundamentação. O sistema lê as duas.
+
+- **Por magistrado** (tela de Juízo): quantas sentenças assinou, taxa de
+  procedência, e — a coluna que decide conduta em audiência — quantas vezes
+  concedeu **apesar** de o laudo não reconhecer incapacidade.
+- **Por perito** (tela de Peritos): a tabela completa de conclusão x desfecho.
+  A taxa de reconhecimento sozinha diz pouco: um perito que reconhece em 20%
+  dos casos pode ser rigoroso ou pode estar sendo desmentido pelo juízo, e são
+  situações opostas para quem decide se impugna.
+
+Duas ressalvas que as telas repetem, e que precisam ser levadas a sério:
+
+1. **A conclusão pericial aqui não vem do laudo.** Vem do que o juiz escreveu
+   sobre o laudo. São duas camadas de intermediação — o perito escreveu, o juiz
+   resumiu, a máquina leu. Serve para apontar tendência e escolher onde olhar,
+   não para citar em peça. Laudo de verdade só pelo PDPJ, e para isso é preciso
+   credencial.
+2. **Grafia varia entre publicações.** Um mesmo juiz pode aparecer duas vezes
+   com escrita diferente e ter o histórico partido em dois. A tela de Juízo
+   mostra em quantas das sentenças coletadas a assinatura foi reconhecida — se
+   a cobertura estiver baixa naquele tribunal, é sinal de que o formato da
+   assinatura ainda não é reconhecido.
+
+Nada disso contamina o acervo do escritório: processo de terceiro entra com
+`processo.proprio = false` e fica fora de toda estatística própria.
+
 ### Quando o DJEN responde 403
 
 Um 403 aqui quase nunca tem a ver com o que foi consultado — a requisição é
