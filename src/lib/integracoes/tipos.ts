@@ -307,11 +307,36 @@ export function normalizarTexto(s: string): string {
  * precisam ficar de fora, senão a estatística conta expediente como
  * decisão.
  */
+const VERBO_DE_DECISAO =
+  /\b(julgo|julga-se|homologo|extingo|dou provimento|nego provimento|condeno)\b/;
+const MARCADOR_DE_DISPOSITIVO =
+  /\b(ante o exposto|diante do exposto|isso posto|pelo exposto|dispositivo|em face do exposto)\b/;
+
 export function pareceDecisao(teor: string | null | undefined): boolean {
-  if (!teor || teor.length < 200) return false;
+  return motivoNaoParecerDecisao(teor) === null;
+}
+
+/**
+ * Por que uma publicação não passou no filtro de sentença — ou null se
+ * passou.
+ *
+ * Existe para a tela poder mostrar o descarte em vez de só escondê-lo.
+ * Um filtro que recusa sem dizer o motivo deixa quem está usando sem
+ * saber se o tribunal publica só aviso ou se o filtro é que está
+ * apertado demais, e essas duas situações pedem providências opostas.
+ */
+export function motivoNaoParecerDecisao(
+  teor: string | null | undefined,
+): string | null {
+  if (!teor) return "publicação sem teor";
+  if (teor.length < 200) return `teor curto demais (${teor.length} caracteres)`;
+
   const t = normalizarTexto(teor);
-  return (
-    /\b(julgo|julga-se|homologo|extingo|dou provimento|nego provimento|condeno)\b/.test(t) &&
-    /\b(ante o exposto|diante do exposto|isso posto|pelo exposto|dispositivo|em face do exposto)\b/.test(t)
-  );
+  if (!VERBO_DE_DECISAO.test(t)) {
+    return "sem verbo de decisão (julgo, homologo, extingo, dou provimento…)";
+  }
+  if (!MARCADOR_DE_DISPOSITIVO.test(t)) {
+    return "sem marcador de dispositivo (ante o exposto, pelo exposto…)";
+  }
+  return null;
 }

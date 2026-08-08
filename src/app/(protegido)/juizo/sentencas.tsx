@@ -154,10 +154,11 @@ export function FormularioSentencas() {
             className="mt-1 h-4 w-4"
           />
           <span>
-            Só o que tem cara de sentença
+            Contar só o que tem cara de sentença
             <span className="block text-xs" style={{ color: "var(--tinta-3)" }}>
-              Descarta despacho e ato ordinatório, que entram no mesmo diário e
-              contariam como decisão.
+              Despacho e ato ordinatório entram no mesmo diário e contariam como
+              decisão. Marcado, eles ficam fora da estatística — mas continuam
+              listados para leitura de qualquer forma.
             </span>
           </span>
         </label>
@@ -229,6 +230,9 @@ function Sentenca({ dados }: { dados: Record<string, unknown> }) {
     <details className="mb-2 border-l-2 pl-3" style={{ borderColor: "var(--marinho)" }}>
       <summary className="cursor-pointer text-sm">
         <span className="font-medium">{String(dados.numeroCnj ?? "sem número")}</span>
+        {Boolean(dados.tipo) && (
+          <span className="selo selo-neutro ml-2">{String(dados.tipo)}</span>
+        )}
         {Boolean(dados.resultado) && (
           <span className="selo selo-neutro ml-2">
             {rotulo(RESULTADO, String(dados.resultado))}
@@ -237,6 +241,11 @@ function Sentenca({ dados }: { dados: Record<string, unknown> }) {
         <span className="block text-xs" style={{ color: "var(--tinta-3)" }}>
           {String(dados.orgao ?? "—")} · {String(dados.data ?? "—")}
         </span>
+        {Boolean(dados.motivoDescarte) && (
+          <span className="block text-xs" style={{ color: "var(--reves)" }}>
+            Não conta como sentença: {String(dados.motivoDescarte)}
+          </span>
+        )}
       </summary>
 
       {partes.dividida ? (
@@ -329,6 +338,8 @@ function Resultado({ dados }: { dados: Record<string, unknown> }) {
   const porOrgao = (dados.porOrgao as Record<string, number>) ?? {};
   const porResultado = (dados.porResultado as Record<string, number>) ?? {};
   const amostra = (dados.amostra as Record<string, unknown>[]) ?? [];
+  const sentencas = amostra.filter((a) => !a.motivoDescarte);
+  const descartadas = amostra.filter((a) => a.motivoDescarte);
 
   return (
     <div className="space-y-3">
@@ -370,18 +381,44 @@ function Resultado({ dados }: { dados: Record<string, unknown> }) {
       )}
 
       {amostra.length > 0 && (
-        <div>
-          <div className="rotulo-campo">Sentenças encontradas</div>
-          <p className="mb-2 text-xs" style={{ color: "var(--tinta-3)" }}>
-            {Number(dados.amostraDe ?? amostra.length) > amostra.length
-              ? `Mostrando ${amostra.length} das ${String(dados.amostraDe)}. ` +
-                `Desmarque "Apenas testar" para gravar todas e lê-las em Decisões.`
-              : "Clique para ler a sentença dividida em relatório, fundamentação e dispositivo."}
-          </p>
-          {amostra.map((a, i) => (
-            <Sentenca key={i} dados={a} />
-          ))}
-        </div>
+        <>
+          {sentencas.length > 0 && (
+            <div>
+              <div className="rotulo-campo">Sentenças encontradas</div>
+              <p className="mb-2 text-xs" style={{ color: "var(--tinta-3)" }}>
+                Clique para ler, dividida em relatório, fundamentação e
+                dispositivo.
+              </p>
+              {sentencas.map((a, i) => (
+                <Sentenca key={i} dados={a} />
+              ))}
+            </div>
+          )}
+
+          {/* O que o filtro recusou também precisa ser legível. Sem isto a
+              busca terminava em beco sem saída: "nenhuma com cara de
+              sentença" e nada para conferir. */}
+          {descartadas.length > 0 && (
+            <div>
+              <div className="rotulo-campo">Publicações sem cara de sentença</div>
+              <p className="mb-2 text-xs leading-relaxed" style={{ color: "var(--tinta-3)" }}>
+                Ficam fora da contagem de desfechos, mas estão aqui para leitura.
+                Cada uma diz por que não passou. Se alguma for sentença de
+                verdade, é o reconhecimento que precisa de ajuste.
+              </p>
+              {descartadas.map((a, i) => (
+                <Sentenca key={i} dados={a} />
+              ))}
+            </div>
+          )}
+
+          {Number(dados.amostraDe ?? 0) > amostra.length && (
+            <p className="text-xs" style={{ color: "var(--tinta-3)" }}>
+              Mostrando {amostra.length} das {String(dados.amostraDe)} publicações
+              que casaram com o recorte.
+            </p>
+          )}
+        </>
       )}
 
       <pre

@@ -8,7 +8,7 @@
  */
 
 import { consultar } from "@/lib/db";
-import { diagnosticar } from "@/lib/integracoes/tipos";
+import { diagnosticar, motivoNaoParecerDecisao } from "@/lib/integracoes/tipos";
 import * as djen from "@/lib/integracoes/djen";
 import * as datajud from "@/lib/integracoes/datajud";
 import * as pdpj from "@/lib/integracoes/pdpj";
@@ -562,26 +562,39 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
       comAparenciaDeDecisao: candidatas.length,
       porOrgao,
       porResultado,
-      // O teor vai inteiro: sem ele a busca só diz quantas sentenças
-      // existem, e o que se quer é lê-las. O corte em 30 é para o
-      // resultado não virar um megabyte de uma vez — o restante fica
-      // disponível ao gravar.
-      amostraDe: candidatas.length,
-      amostra: candidatas.slice(0, 30).map((p) => ({
-        numeroCnj: p.numeroCnj,
-        orgao: p.orgao,
-        data: p.dataDisponibilizacao,
-        tipo: p.tipoComunicacao,
-        resultado: extrairDaDecisao(p.teor).resultado,
-        teor: p.teor ?? null,
-      })),
+      // TUDO o que casou com o recorte vai para a tela, inclusive o que
+      // o filtro de sentença descartou — com o motivo do descarte junto.
+      //
+      // O filtro existe para proteger a estatística, não para impedir a
+      // leitura. Esconder o descartado deixava a busca terminar em beco
+      // sem saída: "nenhuma com cara de sentença" e nada para conferir,
+      // sem saber se o tribunal publica só aviso ou se o filtro está
+      // apertado demais.
+      amostraDe: filtrados.length,
+      amostra: [
+        ...candidatas.slice(0, 20),
+        ...filtrados.filter((p) => !candidatas.includes(p)).slice(0, 20),
+      ].map((p) => {
+        const motivo = motivoNaoParecerDecisao(p.teor);
+        return {
+          numeroCnj: p.numeroCnj,
+          orgao: p.orgao,
+          data: p.dataDisponibilizacao,
+          tipo: p.tipoComunicacao,
+          resultado: motivo ? null : extrairDaDecisao(p.teor).resultado,
+          motivoDescarte: motivo,
+          teor: p.teor ?? null,
+        };
+      }),
       aviso:
         filtrados.length === 0
           ? "Nada casou com o recorte. Veja `porOrgao` numa busca sem filtro de " +
             "órgão para descobrir a grafia exata que o tribunal usa."
           : candidatas.length === 0
-            ? "Publicações encontradas, mas nenhuma com cara de sentença — este " +
-              "tribunal provavelmente publica só o aviso, não o inteiro teor."
+            ? `Nenhuma das ${filtrados.length} publicações passou no filtro de ` +
+              "sentença. Elas estão listadas abaixo mesmo assim, com o motivo do " +
+              "descarte: se alguma for sentença de verdade, é o filtro que " +
+              "precisa de ajuste, não a busca."
             : `${candidatas.length} sentenças com teor, de ${bruto.totalBruto} publicações lidas.`,
     };
   }

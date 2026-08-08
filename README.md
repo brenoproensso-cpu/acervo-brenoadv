@@ -312,6 +312,19 @@ Quando o texto não deixa reconhecer as divisões — despacho, ementa solta,
 publicação truncada — a tela diz isso e mostra o teor inteiro, em vez de
 inventar um corte.
 
+### O que o filtro de sentença descarta continua legível
+
+Nem todo tribunal publica o inteiro teor. Muitos publicam só o aviso: "fica a
+parte intimada da sentença, cujo teor está disponível no sistema". Isso não é
+sentença e não pode entrar na estatística — mas precisa ser visto, senão a
+busca termina em beco sem saída.
+
+Por isso o resultado traz duas listas: as que passaram no filtro e as que não
+passaram, **as duas abertas para leitura**, cada descarte com o motivo (teor
+curto demais, sem verbo de decisão, sem marcador de dispositivo). Se uma
+sentença de verdade aparecer entre as descartadas, o problema é do
+reconhecimento, não do tribunal — e o motivo indica o que ajustar.
+
 ### Medindo magistrado e perito pela sentença publicada
 
 O DJEN identifica o órgão julgador, nunca quem assinou, e não entrega laudo
