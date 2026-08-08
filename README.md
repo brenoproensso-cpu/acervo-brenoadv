@@ -312,6 +312,26 @@ Quando o texto não deixa reconhecer as divisões — despacho, ementa solta,
 publicação truncada — a tela diz isso e mostra o teor inteiro, em vez de
 inventar um corte.
 
+### Onde fica tudo o que a coleta trouxe
+
+A coleta por vara guarda **todas** as publicações que casaram com o recorte, não
+só as reconhecidas como sentença. São dois destinos, e a diferença importa:
+
+| Tabela | O que guarda | Onde ver |
+|---|---|---|
+| `publicacao` | tudo o que o diário publicou | **Publicações** → Acervo: *Coleta do juízo* |
+| `decisao` | o que foi reconhecido como julgamento | **Decisões** → Acervo: *Coleta do juízo* |
+
+Em Publicações a busca no teor funciona sobre as coletadas, então dá para achar
+uma intimação por palavra do texto mesmo que ela nunca tenha virado decisão.
+
+O modo **"Apenas testar"** não guarda nada — mostra uma amostra de até 40 para
+calibrar o recorte. Para ver o conjunto inteiro, desmarque e busque de novo.
+
+As coletadas entram marcadas como lidas e sem prazo: são processos de terceiros,
+não há o que controlar. Por isso o filtro de acervo em Publicações abre em "Do
+escritório" — prazo perdido por ruído de tela é dano real.
+
 ### O que o filtro de sentença descarta continua legível
 
 Nem todo tribunal publica o inteiro teor. Muitos publicam só o aviso: "fica a

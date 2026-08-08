@@ -413,9 +413,13 @@ function Resultado({ dados }: { dados: Record<string, unknown> }) {
           )}
 
           {Number(dados.amostraDe ?? 0) > amostra.length && (
-            <p className="text-xs" style={{ color: "var(--tinta-3)" }}>
+            <p className="text-xs leading-relaxed" style={{ color: "var(--tinta-3)" }}>
               Mostrando {amostra.length} das {String(dados.amostraDe)} publicações
-              que casaram com o recorte.
+              que casaram com o recorte — o modo de teste não guarda nada, então
+              carrega só uma amostra. Para ver todas,{" "}
+              <strong>desmarque &quot;Apenas testar&quot;</strong> e busque de novo:
+              as {String(dados.amostraDe)} ficam em <strong>Publicações</strong>,
+              filtro &quot;Coleta do juízo&quot;, com busca no teor.
             </p>
           )}
         </>

@@ -16,7 +16,7 @@
 -- então reaplicar não duplica nem apaga dado nenhum — apenas acrescenta
 -- o que falta e reafirma o resto.
 --
--- Contém 12 migrations. NÃO inclui dados de demonstração.
+-- Contém 13 migrations. NÃO inclui dados de demonstração.
 -- =====================================================================
 
 begin;
@@ -2077,10 +2077,58 @@ insert into schema_migrations (versao) values ('0012_magistrado_perito_coleta.sq
   on conflict (versao) do nothing;
 
 
+-- =====================================================================
+-- 0013_publicacao_coletada.sql
+-- =====================================================================
+-- =====================================================================
+-- 0013 — guardar TODA publicação coletada, não só as que viram decisão
+-- =====================================================================
+-- A coleta por vara lia 272 publicações, reconhecia 40 como sentença e
+-- jogava fora as outras 232. Quem buscava ficava sem nada: as descartadas
+-- só existiam durante a execução, e não havia tela onde encontrá-las.
+--
+-- Isso confundia duas coisas diferentes:
+--
+--   publicacao — o que o diário publicou. Todas entram.
+--   decisao    — o que reconhecemos como julgamento. Só as que passam.
+--
+-- A tabela `publicacao` já existia para as intimações do escritório, com
+-- busca no teor e tudo. Faltava a coleta escrever nela.
+--
+-- A coluna `coletada` separa as duas populações. Sem ela, 272 publicações
+-- de terceiros cairiam no mesmo lugar onde se controla prazo do
+-- escritório — e prazo perdido por ruído de tela é dano real.
+-- =====================================================================
+
+alter table publicacao
+  add column if not exists coletada boolean not null default false;
+
+comment on column publicacao.coletada is
+  'true = trazida pela coleta por vara (processo de terceiro, sem prazo a controlar). '
+  'false = publicação dos processos do escritório.';
+
+-- O padrão da tela de Publicações é mostrar só as do escritório, então o
+-- índice serve à consulta mais frequente.
+create index if not exists idx_publicacao_coletada
+  on publicacao (coletada, data_disponibilizacao desc);
+
+-- ---------------------------------------------------------------------
+-- Publicação coletada não tem prazo do escritório: ninguém precisa
+-- recorrer de sentença de terceiro. Deixar `lida = false` faria o contador
+-- de não lidas do painel subir às centenas sem nenhuma providência
+-- possível.
+-- ---------------------------------------------------------------------
+update publicacao set lida = true, prazo_dias = null, prazo_fatal = null
+where coletada and (not lida or prazo_dias is not null);
+
+insert into schema_migrations (versao) values ('0013_publicacao_coletada.sql')
+  on conflict (versao) do nothing;
+
+
 commit;
 
 -- ---------------------------------------------------------------------
--- Conferência: deve listar 12 migrations e as tabelas do sistema.
+-- Conferência: deve listar 13 migrations e as tabelas do sistema.
 -- ---------------------------------------------------------------------
 select versao, aplicada_em from schema_migrations order by versao;
 

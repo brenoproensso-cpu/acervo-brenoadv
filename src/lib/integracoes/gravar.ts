@@ -684,6 +684,51 @@ export type ResultadoGravacaoSentenca = {
   motivo?: string;
 };
 
+/**
+ * Guarda uma publicação trazida pela coleta por vara.
+ *
+ * Toda publicação que casou com o recorte entra aqui, tenha ou não cara
+ * de sentença. É o que dá endereço às que o filtro descarta: sem isto
+ * elas existiam só durante a execução da busca, e quem tinha 272
+ * resultados conseguia ver 40.
+ *
+ * Não cria processo. Publicação de terceiro que não virou decisão não
+ * precisa de processo no acervo, e criar um para cada encheria a tabela
+ * de casos que ninguém acompanha.
+ */
+export async function gravarPublicacaoColetada(
+  p: PublicacaoNormalizada,
+  orgaoNome: string | null,
+  tribunal: string | null,
+): Promise<boolean> {
+  const r = await consultarUm<{ id: string }>(
+    `insert into publicacao (
+       id_externo, numero_cnj, tribunal, orgao, tipo_comunicacao,
+       data_disponibilizacao, data_publicacao, teor, destinatarios, advogados,
+       link_certidao, coletada, lida
+     ) values (
+       $1, $2, $3, $4, $5, $6::date, $7::date, $8, $9::jsonb, $10::jsonb,
+       $11, true, true
+     )
+     on conflict (id_externo) do nothing
+     returning id`,
+    [
+      p.idExterno,
+      p.numeroCnj ?? null,
+      tribunal ?? p.tribunal ?? null,
+      p.orgao ?? orgaoNome ?? null,
+      p.tipoComunicacao ?? null,
+      p.dataDisponibilizacao ?? null,
+      p.dataPublicacao ?? null,
+      p.teor ?? null,
+      JSON.stringify(p.destinatarios ?? []),
+      JSON.stringify(p.advogados ?? []),
+      p.linkCertidao ?? null,
+    ],
+  );
+  return r !== null;
+}
+
 export async function gravarSentencaColetada(
   p: PublicacaoNormalizada,
   orgaoNome: string | null,

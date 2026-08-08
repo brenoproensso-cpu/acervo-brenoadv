@@ -11,7 +11,8 @@ export const MIGRACOES = [
   "0009_decisao_conferida.sql",
   "0010_autenticacao.sql",
   "0011_benchmark_juizo.sql",
-  "0012_magistrado_perito_coleta.sql"
+  "0012_magistrado_perito_coleta.sql",
+  "0013_publicacao_coletada.sql"
 ] as const;
 
-export const ULTIMA_MIGRACAO = "0012_magistrado_perito_coleta.sql";
+export const ULTIMA_MIGRACAO = "0013_publicacao_coletada.sql";

@@ -21,6 +21,7 @@ import {
   gravarProcessoBenchmark,
   garantirOrgao,
   gravarSentencaColetada,
+  gravarPublicacaoColetada,
 } from "@/lib/integracoes/gravar";
 import { extrairDaDecisao } from "@/lib/integracoes/extracao";
 
@@ -593,17 +594,22 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
           : candidatas.length === 0
             ? `Nenhuma das ${filtrados.length} publicações passou no filtro de ` +
               "sentença. Elas estão listadas abaixo mesmo assim, com o motivo do " +
-              "descarte: se alguma for sentença de verdade, é o filtro que " +
-              "precisa de ajuste, não a busca."
+              "descarte. Desmarcando \"Apenas testar\", todas ficam guardadas em " +
+              "Publicações — inclusive as descartadas."
             : `${candidatas.length} sentenças com teor, de ${bruto.totalBruto} publicações lidas.`,
     };
   }
 
   let novas = 0;
   let decisoes = 0;
+  let publicacoes = 0;
+  let jaExistiam = 0;
   const descartadas: Record<string, number> = {};
 
-  for (const p of candidatas) {
+  // Primeiro TUDO o que casou com o recorte vira publicação. A decisão é
+  // um segundo passo, só para o que tem cara de sentença — assim o que o
+  // filtro recusa continua existindo e tem onde ser lido.
+  for (const p of filtrados) {
     await gravarBruto({
       fonte: "djen",
       tipo: "comunicacao",
@@ -611,6 +617,16 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
       numeroCnj: p.numeroCnj,
       payload: p,
     });
+    if (await gravarPublicacaoColetada(p, c.orgao ?? null, c.tribunal ?? null)) {
+      publicacoes++;
+    } else {
+      // Repetir a mesma busca é comum e não deve parecer falha: sem esta
+      // contagem, a segunda execução dizia "0 publicações guardadas".
+      jaExistiam++;
+    }
+  }
+
+  for (const p of candidatas) {
     const r = await gravarSentencaColetada(p, c.orgao ?? p.orgao ?? null, c.tribunal ?? null);
     if (r.novo) novas++;
     if (r.decisaoCriada) decisoes++;
@@ -630,14 +646,18 @@ export async function coletarDjenPorOrgao(c: ColetaDjen) {
     publicacoesLidas: bruto.totalBruto,
     aposFiltro: filtrados.length,
     comAparenciaDeDecisao: candidatas.length,
+    publicacoesGuardadas: publicacoes,
+    publicacoesJaGuardadas: jaExistiam,
     processosNovos: novas,
     decisoesGravadas: decisoes,
     descartadas,
     aviso:
-      decisoes > 0
-        ? `${decisoes} sentenças gravadas com inteiro teor. Veja em Decisões, ` +
-          `filtro "Coleta do juízo".`
-        : `Nenhuma sentença foi gravada, embora ${candidatas.length} tenham sido ` +
-          `encontradas. Veja "descartadas" abaixo: ali está o motivo de cada uma.`,
+      `${publicacoes + jaExistiam} publicações no acervo de coleta` +
+      (jaExistiam ? ` (${publicacoes} novas, ${jaExistiam} já estavam lá)` : "") +
+      `, todas legíveis em Publicações, filtro "Coleta do juízo". ` +
+      (decisoes > 0
+        ? `Destas, ${decisoes} foram reconhecidas como sentença e estão também ` +
+          `em Decisões, com o teor dividido.`
+        : `Nenhuma foi reconhecida como sentença; veja "descartadas" para o motivo.`),
   };
 }
